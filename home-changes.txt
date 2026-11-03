@@ -1,0 +1,291 @@
+diff --git a/src/pages/Home.tsx b/src/pages/Home.tsx
+index a94fcfb..3cd96e4 100644
+--- a/src/pages/Home.tsx
++++ b/src/pages/Home.tsx
+@@ -10,6 +10,10 @@ import {
+   Sparkles,
+   CheckCircle2,
+   Play,
++  Layers,
++  MessageCircle,
++  Lightbulb,
++  Wallet,
+   Users,
+   MessageSquareQuote,
+   Compass,
+@@ -28,9 +32,42 @@ const GOOGLE_BUSINESS_URL =
+ const GOOGLE_WRITE_REVIEW_URL =
+   `${GOOGLE_BUSINESS_URL}${GOOGLE_BUSINESS_URL.includes('?') ? '&' : '?'}action=writeReview`;
+ const HERO_PHOTO_FALLBACK_URL =
+-  "https://gpnfznwqwaokfzmozpxo.supabase.co/storage/v1/object/public/Uptrend's%20English%20Academy-photos/hero_photo/Smiling%20Student%20Duo%20with%20Backpacks%20and%20Books.png";
++  "https://gpnfznwqwaokfzmozpxo.supabase.co/storage/v1/object/public/Uptrend's%20English%20Academy-photos/hero_photo/Smiling%20Student%20Duo%20with%20Backpacks%20and%20Books(1).png";
+ const LOCAL_HERO_PHOTO_FALLBACK_URL = '/assets/hero-students-reference.png';
+ 
++const academyAdvantages = [
++  {
++    title: 'Level-Based Learning',
++    description: 'We have Level 1, Level 2, and Level 3 tests. You learn at your own speed and progress step by step.',
++    icon: Layers,
++  },
++  {
++    title: 'Small Batches',
++    description: 'Only 10–15 students per batch, so every student gets individual attention.',
++    icon: Users,
++  },
++  {
++    title: '100% Speaking Practice',
++    description: 'No silent classrooms. You speak, practise, and participate in every class.',
++    icon: MessageCircle,
++  },
++  {
++    title: 'Simple Teaching Method',
++    description: 'No complex rules. Learn English through simple explanations and everyday examples.',
++    icon: Lightbulb,
++  },
++  {
++    title: 'Flexible Timings',
++    description: 'Choose from morning, afternoon, and evening batches to suit working people and students.',
++    icon: Clock,
++  },
++  {
++    title: 'Affordable Fees',
++    description: 'Quality English education at a price every family can afford.',
++    icon: Wallet,
++  },
++] as const;
++
+ interface HomeProps {
+   programs: Program[];
+   mediaItems: MediaItem[];
+@@ -186,40 +223,37 @@ export const Home: React.FC<HomeProps> = ({
+   return (
+     <div className="space-y-20 pb-16">
+       {/* HERO SECTION */}
+-      <section className="relative isolate border-b border-orange-100 bg-[#fff8ef] py-6 sm:py-8 min-[1100px]:!pt-0 min-[1100px]:!pb-0 min-[1100px]:min-h-[calc(100svh-164px)]">
++      <section className="relative isolate border-b border-orange-100 bg-[#fff8ef] py-6 max-[639px]:py-3 sm:py-8 min-[1100px]:!pt-0 min-[1100px]:!pb-0 min-[1100px]:min-h-[calc(100svh-164px)]">
+         <div aria-hidden="true" className="pointer-events-none absolute -left-20 bottom-[-8rem] h-64 w-64 rounded-full border-[2.5rem] border-orange-100/70 sm:h-80 sm:w-80" />
+         <div aria-hidden="true" className="pointer-events-none absolute right-[39%] top-12 hidden h-10 w-10 rotate-45 border border-amber-200 sm:block" />
+         <div className="relative mx-auto max-w-[1360px] px-4 sm:px-6 lg:px-8">
+-          <div className="grid min-w-0 grid-cols-1 items-center gap-8 min-[1100px]:h-[calc(100svh-164px)] min-[1100px]:mb-0 min-[1100px]:pb-0 min-[1100px]:grid-cols-[minmax(0,0.78fr)_minmax(0,1.22fr)] min-[1100px]:items-stretch min-[1100px]:gap-4">
+-            <div className="relative z-10 flex min-w-0 flex-col justify-center gap-4 py-2 min-[1100px]:py-5">
+-              <div className="inline-flex items-center gap-2 rounded-full bg-transparent px-0 py-1 text-[11px] font-bold uppercase tracking-[0.16em] text-orange-700 sm:text-xs">
++          <div className="grid min-w-0 grid-cols-1 items-center gap-8 max-[639px]:gap-3 min-[1100px]:h-[calc(100svh-164px)] min-[1100px]:mb-0 min-[1100px]:pb-0 min-[1100px]:grid-cols-[minmax(0,1.16fr)_minmax(0,0.84fr)] min-[1100px]:items-stretch min-[1100px]:gap-4">
++            <div className="relative z-10 flex min-w-0 flex-col justify-center gap-4 py-2 max-[639px]:order-2 max-[639px]:gap-2 max-[639px]:py-0 min-[1100px]:py-5">
++              <div className="inline-flex items-center gap-2 rounded-full bg-transparent px-0 py-1 text-[11px] font-bold uppercase tracking-[0.16em] text-orange-700 max-[639px]:mx-auto max-[639px]:justify-center max-[639px]:text-center sm:text-xs">
+                 <Sparkles className="h-4 w-4 text-orange-600" />
+                 <span>WELCOME TO UPTREND'S ENGLISH ACADEMY</span>
+               </div>
+ 
+-              <h1 className="w-full max-w-none font-serif text-[clamp(3rem,8vw,3.75rem)] font-bold leading-[0.98] tracking-tight text-slate-950 sm:text-[clamp(3.5rem,5.5vw,4.25rem)] min-[1100px]:text-[clamp(5rem,6.2vw,6.25rem)]">
+-  <span className="block whitespace-nowrap">Speak English</span>
+-  <span className="block whitespace-nowrap">Fluently and</span>
+-  <span className="block whitespace-nowrap">
+-    <span className="text-orange-600">Confidently</span>
+-  </span>
+-  <span className="block whitespace-nowrap">in Davangere</span>
+-</h1>
++              <h1 className="w-full max-w-none text-[clamp(3rem,8vw,3.75rem)] font-bold leading-[0.98] tracking-tight text-slate-950 max-[639px]:text-[clamp(2.25rem,10vw,2.75rem)] max-[639px]:text-center sm:text-[clamp(3.5rem,5.5vw,4.25rem)] min-[1100px]:!text-[clamp(3.375rem,4.75vw,4.25rem)]" style={{ fontFamily: 'Outfit, sans-serif' }}>
++                <span className="block">Speak English</span>
++                <span className="block min-[640px]:whitespace-nowrap">Fluently and <span className="text-orange-600">Confidently</span></span>
++                <span className="block">in Davangere</span>
++              </h1>
+ 
+-              <p className="max-w-[38rem] text-base leading-relaxed text-slate-600 sm:text-lg">
++              <p className="max-w-[38rem] text-base leading-relaxed text-slate-600 max-[639px]:mx-auto max-[639px]:text-center max-[639px]:text-sm max-[639px]:leading-snug sm:text-lg">
+                 Uptrend's English Academy offers simple, level-based Spoken English,
+                 Grammar, and Kids English classes. Small batches. More speaking
+                 practice. Faster results.
+               </p>
+ 
+-              <div className="flex flex-col items-stretch gap-3 pt-1 min-[420px]:flex-row min-[420px]:flex-wrap min-[420px]:items-center min-[1100px]:flex-nowrap">
++              <div className="flex flex-col items-stretch gap-3 pt-1 max-[639px]:w-full max-[639px]:items-center max-[639px]:gap-2 max-[639px]:pt-0 min-[640px]:flex-row min-[640px]:flex-wrap min-[640px]:items-center min-[1100px]:flex-nowrap">
+                 <button
+                   type="button"
+                   onClick={() => {
+                     setCurrentPage('programs');
+                     window.scrollTo({ top: 0, behavior: 'smooth' });
+                   }}
+-                  className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg bg-orange-600 px-5 py-3 text-sm font-bold text-white shadow-md shadow-orange-600/20 transition hover:bg-orange-500 hover:shadow-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-700 motion-reduce:transition-none sm:px-6 sm:text-base"
++                  className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg bg-orange-600 px-5 py-3 text-sm font-bold text-white shadow-md shadow-orange-600/20 transition hover:bg-orange-500 hover:shadow-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-700 motion-reduce:transition-none max-[639px]:w-full max-[639px]:max-w-[22rem] sm:px-6 sm:text-base"
+                 >
+                   Explore Courses
+                   <ArrowRight className="h-5 w-5" />
+@@ -228,19 +262,19 @@ export const Home: React.FC<HomeProps> = ({
+                 <button
+                   type="button"
+                   onClick={openDemoClassModal}
+-                  className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg border border-orange-400 bg-white px-5 py-3 text-sm font-bold text-orange-700 shadow-sm transition hover:border-orange-500 hover:bg-orange-600 hover:text-white hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-700 motion-reduce:transition-none sm:px-6 sm:text-base"
++                  className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg border border-orange-400 bg-white px-5 py-3 text-sm font-bold text-orange-700 shadow-sm transition hover:border-orange-500 hover:bg-orange-600 hover:text-white hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-700 motion-reduce:transition-none max-[639px]:w-full max-[639px]:max-w-[22rem] sm:px-6 sm:text-base"
+                 >
+                   <CalendarDays className="h-4 w-4 shrink-0" aria-hidden="true" />
+                   <span>Book Your FREE Demo Class</span>
+                 </button>
+               </div>
+ 
+-              <div className="grid grid-cols-1 gap-3 border-t border-orange-200 pt-4 text-[11px] font-medium leading-snug text-slate-600 min-[420px]:grid-cols-2 min-[1100px]:grid-cols-2 min-[1100px]:gap-3">
+-                <div className="flex min-w-0 items-center gap-2">
++              <div className="grid grid-cols-1 gap-3 border-t border-orange-200 pt-4 text-[11px] font-medium leading-snug text-slate-600 max-[639px]:grid-cols-2 max-[639px]:justify-items-center max-[639px]:gap-2 max-[639px]:pt-3 max-[639px]:text-center min-[640px]:grid-cols-2 min-[1100px]:grid-cols-2 min-[1100px]:gap-3">
++                <div className="flex min-w-0 items-center gap-2 max-[639px]:justify-center">
+                   <UsersRound className="h-4 w-4 shrink-0 text-emerald-600" />
+                   <span>Trusted by 20,000+ Students in Karnataka</span>
+                 </div>
+-                <div className="flex min-w-0 items-center gap-2">
++                <div className="flex min-w-0 items-center gap-2 max-[639px]:justify-center">
+                   <GraduationCap className="h-4 w-4 shrink-0 text-emerald-600" />
+                   <span>Beginner to Advanced Levels</span>
+                 </div>
+@@ -248,12 +282,12 @@ export const Home: React.FC<HomeProps> = ({
+             </div>
+ 
+             {/* HERO IMAGE: aligned to the navigation edge and hero bottom on desktop */}
+-            <div className="relative min-h-[320px] min-w-0 w-full overflow-visible min-[1100px]:h-full min-[1100px]:min-h-0">
++            <div className="relative min-h-[320px] min-w-0 w-full overflow-visible max-[639px]:order-1 max-[639px]:h-[clamp(10rem,55vw,14rem)] max-[639px]:min-h-0 min-[1100px]:h-full min-[1100px]:min-h-0">
+               <img
+                 src={heroPhotoSource || undefined}
+                 alt="Two smiling college students holding books against a warm cream background"
+                 onError={handleHeroPhotoError}
+-                className="block h-full w-full bg-transparent object-contain object-bottom min-[1100px]:absolute min-[1100px]:top-[22%] min-[1100px]:bottom-0 min-[1100px]:left-0 min-[1100px]:right-0 min-[1100px]:h-auto min-[1100px]:w-full min-[1100px]:max-w-none min-[1100px]:scale-[1.2] min-[1100px]:origin-bottom-right min-[1100px]:translate-x-[20%] min-[1100px]:object-right-bottom"
++                className="block h-full w-full bg-transparent object-contain object-bottom max-[639px]:!h-full min-[1100px]:absolute min-[1100px]:bottom-0 min-[1100px]:!left-auto min-[1100px]:right-0 min-[1100px]:!h-[620px] min-[1100px]:!w-auto min-[1100px]:!max-w-none min-[1100px]:origin-bottom-right min-[1100px]:translate-x-[8%] min-[1100px]:object-right-bottom min-[1280px]:!h-[500px] min-[1280px]:!translate-x-[12%] min-[1440px]:!h-[600px] min-[1440px]:!translate-x-[16%] min-[1600px]:!h-[650px] min-[1600px]:!translate-x-[20%]"
+               />
+             </div>
+           </div>
+@@ -417,105 +451,55 @@ export const Home: React.FC<HomeProps> = ({
+       {/* WHY CHOOSE US */}
+       <section
+         ref={whySectionRef}
+-        className={`overflow-hidden border-y border-orange-100 bg-[#fbfaf7] py-5 transition-[opacity,transform] duration-700 ease-out motion-reduce:translate-y-0 motion-reduce:opacity-100 motion-reduce:transition-none sm:py-16 lg:py-20 ${
++        className={`why-benefits-section border-y border-orange-100 bg-[#fbfaf7] py-4 transition-[opacity,transform] duration-700 ease-out motion-reduce:translate-y-0 motion-reduce:opacity-100 motion-reduce:transition-none sm:py-6 lg:py-8 ${
+           whySectionVisible ? 'translate-y-0 opacity-100' : 'translate-y-5 opacity-0'
+         }`}
+       >
+         <div className="mx-auto max-w-7xl px-3 sm:px-6 lg:px-8">
+-          <div className="mx-auto mb-3 max-w-3xl text-center sm:mb-10 lg:mb-12">
++          <div className="why-benefits-header mx-auto mb-4 max-w-3xl text-center sm:mb-5">
+             <span className="inline-flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.16em] text-orange-700 sm:text-xs sm:tracking-[0.18em]">
+               <span className="h-px w-7 bg-emerald-600" aria-hidden="true" />
+               The Uptrend’s Advantage
+               <span className="h-px w-7 bg-emerald-600" aria-hidden="true" />
+             </span>
+-            <h2 className="mt-2 text-[clamp(1.25rem,5vw,1.55rem)] font-extrabold leading-tight tracking-tight text-slate-950 sm:mt-4 sm:text-4xl lg:text-5xl">
++            <h2 className="mt-1.5 text-xl font-extrabold leading-tight tracking-tight text-slate-950 sm:mt-2 sm:text-2xl lg:text-3xl">
+               Why Learn English with Us?
+             </h2>
+-            <p className="mx-auto mt-2 max-w-2xl text-xs leading-4 text-slate-600 sm:mt-4 sm:text-base sm:leading-relaxed">
++            <p className="mx-auto mt-1.5 max-w-2xl text-xs leading-4 text-slate-600 sm:mt-2 sm:text-sm sm:leading-snug">
+               Our training methodology focuses on practical speaking habituation rather than rote memorization.
+             </p>
+           </div>
+ 
+-          <div className="grid min-w-0 grid-cols-2 auto-rows-fr gap-2 sm:gap-5 lg:gap-6">
+-            <article className="group flex min-w-0 flex-col items-center rounded-2xl border border-orange-200/80 bg-white p-2.5 text-center shadow-sm transition-all duration-300 hover:-translate-y-1 hover:border-orange-300 hover:shadow-lg motion-reduce:transform-none sm:rounded-3xl sm:p-7 lg:p-8">
+-              <span className="mb-1.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-orange-50 text-orange-700 transition-colors duration-300 group-hover:bg-orange-100 sm:mb-5 sm:h-12 sm:w-12 sm:rounded-2xl">
+-                <Users className="h-4 w-4 sm:h-6 sm:w-6" aria-hidden="true" />
+-              </span>
+-              <h3 className="text-center text-xs font-bold leading-tight tracking-tight text-slate-950 sm:text-xl sm:leading-snug lg:text-2xl">
+-                Interactive Speaking Practice
+-              </h3>
+-              <p className="mt-1.5 text-center text-xs leading-[1.3] text-slate-600 sm:mt-3 sm:text-sm sm:leading-7 lg:text-base">
+-                <span className="sm:hidden" aria-hidden="true">
+-                  Practise with pair work, everyday dialogues, and speaking drills.
+-                </span>
+-                <span className="sr-only sm:hidden">
+-                  Overcome the fear of making mistakes with supportive pair work, everyday situational dialogues, and structured speaking drills.
+-                </span>
+-                <span className="hidden sm:inline">
+-                  Overcome the fear of making mistakes with supportive pair work, everyday situational dialogues, and structured speaking drills.
+-                </span>
+-              </p>
+-            </article>
+-
+-            <article className="group flex min-w-0 flex-col items-center rounded-2xl border border-emerald-200/80 bg-white p-2.5 text-center shadow-sm transition-all duration-300 hover:-translate-y-1 hover:border-emerald-300 hover:shadow-lg motion-reduce:transform-none sm:rounded-3xl sm:p-7 lg:p-8">
+-              <span className="mb-1.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700 transition-colors duration-300 group-hover:bg-emerald-100 sm:mb-5 sm:h-12 sm:w-12 sm:rounded-2xl">
+-                <BookOpen className="h-4 w-4 sm:h-6 sm:w-6" aria-hidden="true" />
+-              </span>
+-              <h3 className="text-center text-xs font-bold leading-tight tracking-tight text-slate-950 sm:text-xl sm:leading-snug lg:text-2xl">
+-                Grammar with Immediate Application
+-              </h3>
+-              <p className="mt-1.5 text-center text-xs leading-[1.3] text-slate-600 sm:mt-3 sm:text-sm sm:leading-7 lg:text-base">
+-                <span className="sm:hidden" aria-hidden="true">
+-                  Apply grammar, sentence structure, and vocabulary in speech.
+-                </span>
+-                <span className="sr-only sm:hidden">
+-                  Learn core tenses, sentence structures, and functional vocabulary with immediate speaking reinforcement in context.
+-                </span>
+-                <span className="hidden sm:inline">
+-                  Learn core tenses, sentence structures, and functional vocabulary with immediate speaking reinforcement in context.
+-                </span>
+-              </p>
+-            </article>
+-
+-            <article className="group flex min-w-0 flex-col items-center rounded-2xl border border-emerald-200/80 bg-white p-2.5 text-center shadow-sm transition-all duration-300 hover:-translate-y-1 hover:border-emerald-300 hover:shadow-lg motion-reduce:transform-none sm:rounded-3xl sm:p-7 lg:p-8">
+-              <span className="mb-1.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700 transition-colors duration-300 group-hover:bg-emerald-100 sm:mb-5 sm:h-12 sm:w-12 sm:rounded-2xl">
+-                <UsersRound className="h-4 w-4 sm:h-6 sm:w-6" aria-hidden="true" />
+-              </span>
+-              <h3 className="text-center text-xs font-bold leading-tight tracking-tight text-slate-950 sm:text-xl sm:leading-snug lg:text-2xl">
+-                Small-Batch Learning Experience
+-              </h3>
+-              <p className="mt-1.5 text-center text-xs leading-[1.3] text-slate-600 sm:mt-3 sm:text-sm sm:leading-7 lg:text-base">
+-                <span className="sm:hidden" aria-hidden="true">
+-                  More chances to practise, ask questions, and get personal attention.
+-                </span>
+-                <span className="sr-only sm:hidden">
+-                  Enjoy more opportunities to practise speaking, ask questions, and receive personal attention in a supportive learning environment.
+-                </span>
+-                <span className="hidden sm:inline">
+-                  Enjoy more opportunities to practise speaking, ask questions, and receive personal attention in a supportive learning environment.
+-                </span>
+-              </p>
+-            </article>
+-
+-            <article className="group flex min-w-0 flex-col items-center rounded-2xl border border-orange-200/80 bg-white p-2.5 text-center shadow-sm transition-all duration-300 hover:-translate-y-1 hover:border-orange-300 hover:shadow-lg motion-reduce:transform-none sm:rounded-3xl sm:p-7 lg:p-8">
+-              <span className="mb-1.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-orange-50 text-orange-700 transition-colors duration-300 group-hover:bg-orange-100 sm:mb-5 sm:h-12 sm:w-12 sm:rounded-2xl">
+-                <GraduationCap className="h-4 w-4 sm:h-6 sm:w-6" aria-hidden="true" />
+-              </span>
+-              <h3 className="text-center text-xs font-bold leading-tight tracking-tight text-slate-950 sm:text-xl sm:leading-snug lg:text-2xl">
+-                Personalized Learning Support
+-              </h3>
+-              <p className="mt-1.5 text-center text-xs leading-[1.3] text-slate-600 sm:mt-3 sm:text-sm sm:leading-7 lg:text-base">
+-                <span className="sm:hidden" aria-hidden="true">
+-                  Step-by-step guidance to build confidence and communication.
+-                </span>
+-                <span className="sr-only sm:hidden">
+-                  Build your English skills step by step with guidance suited to your learning level, helping you improve your confidence and communication skills.
+-                </span>
+-                <span className="hidden sm:inline">
+-                  Build your English skills step by step with guidance suited to your learning level, helping you improve your confidence and communication skills.
+-                </span>
+-              </p>
+-            </article>
++          <div className="why-benefits-grid grid min-w-0 auto-rows-fr grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-3 lg:gap-4">
++            {academyAdvantages.map(({ title, description, icon: Icon }, index) => {
++              const isOrange = index % 2 === 0;
++              return (
++                <article
++                  key={title}
++                  className={`why-benefits-card group flex min-w-0 flex-col items-center rounded-xl border bg-white p-2.5 text-center shadow-sm transition-shadow duration-200 hover:shadow-md sm:p-3 lg:p-4 ${
++                    isOrange
++                      ? 'border-orange-200/80 hover:border-orange-300'
++                      : 'border-emerald-200/80 hover:border-emerald-300'
++                  }`}
++                >
++                  <span
++                    className={`why-benefits-icon mb-2 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors sm:h-9 sm:w-9 ${
++                      isOrange
++                        ? 'bg-orange-50 text-orange-700 group-hover:bg-orange-100'
++                        : 'bg-emerald-50 text-emerald-700 group-hover:bg-emerald-100'
++                    }`}
++                  >
++                    <Icon className="h-4 w-4 sm:h-5 sm:w-5" aria-hidden="true" />
++                  </span>
++                  <h3 className="why-benefits-title text-[clamp(0.75rem,2.4vw,0.95rem)] font-bold leading-tight text-slate-950 sm:text-base lg:text-lg">
++                    {title}
++                  </h3>
++                  <p className="why-benefits-description mt-1.5 text-[11px] leading-[1.35] text-slate-600 sm:mt-2 sm:text-xs sm:leading-snug lg:text-sm">
++                    {description}
++                  </p>
++                </article>
++              );
++            })}
+           </div>
+         </div>
+       </section>
