@@ -88,6 +88,7 @@ const R2_ACCOUNT_ID = process.env.CLOUDFLARE_R2_ACCOUNT_ID || '';
 const R2_ACCESS_KEY_ID = process.env.CLOUDFLARE_R2_ACCESS_KEY_ID || '';
 const R2_SECRET_ACCESS_KEY = process.env.CLOUDFLARE_R2_SECRET_ACCESS_KEY || '';
 const R2_BUCKET = process.env.CLOUDFLARE_R2_BUCKET_NAME || 'uptrends-academy-media';
+const R2_PUBLIC_BUCKET = process.env.CLOUDFLARE_R2_PUBLIC_BUCKET_NAME || 'uptrends-academy-public';
 const R2_PUBLIC_URL = process.env.CLOUDFLARE_R2_PUBLIC_URL || '';
 
 const r2Client = (R2_ACCOUNT_ID && R2_ACCESS_KEY_ID && R2_SECRET_ACCESS_KEY)
@@ -101,26 +102,27 @@ const r2Client = (R2_ACCOUNT_ID && R2_ACCESS_KEY_ID && R2_SECRET_ACCESS_KEY)
     })
   : null;
 
-const applicationMedia: R2BucketBinding | undefined = r2Client
+const createR2BucketBinding = (bucketName: string): R2BucketBinding | undefined =>
+  r2Client
   ? {
       put: async (key, value, options) => {
         const body = value instanceof ArrayBuffer
           ? Buffer.from(value)
           : Buffer.from(new Uint8Array(value.buffer, value.byteOffset, value.byteLength));
         await r2Client.send(new PutObjectCommand({
-          Bucket: R2_BUCKET,
+          Bucket: bucketName,
           Key: key,
           Body: body,
           ContentType: options?.httpMetadata?.contentType,
         }));
       },
       delete: async (key) => {
-        await r2Client.send(new DeleteObjectCommand({ Bucket: R2_BUCKET, Key: key }));
+        await r2Client.send(new DeleteObjectCommand({ Bucket: bucketName, Key: key }));
       },
       get: async (key) => {
         let object;
         try {
-          object = await r2Client.send(new GetObjectCommand({ Bucket: R2_BUCKET, Key: key }));
+          object = await r2Client.send(new GetObjectCommand({ Bucket: bucketName, Key: key }));
         } catch (error) {
           const errorName = error instanceof Error ? error.name : '';
           const metadata = typeof error === 'object' && error !== null && '$metadata' in error
@@ -146,7 +148,7 @@ const applicationMedia: R2BucketBinding | undefined = r2Client
       },
       list: async (options) => {
         const page = await r2Client.send(new ListObjectsV2Command({
-          Bucket: R2_BUCKET,
+          Bucket: bucketName,
           Prefix: options?.prefix,
           ContinuationToken: options?.cursor,
           MaxKeys: options?.limit,
@@ -161,6 +163,9 @@ const applicationMedia: R2BucketBinding | undefined = r2Client
       },
     }
   : undefined;
+
+const applicationMedia = createR2BucketBinding(R2_BUCKET);
+const publicMedia = createR2BucketBinding(R2_PUBLIC_BUCKET);
 
 async function dispatchWorkerApi(req: express.Request, res: express.Response) {
   try {
@@ -190,6 +195,7 @@ async function dispatchWorkerApi(req: express.Request, res: express.Response) {
         VITE_SUPABASE_ANON_KEY: process.env.VITE_SUPABASE_ANON_KEY || '',
         SUPABASE_SERVICE_ROLE_KEY: SUPABASE_SERVICE_KEY,
         APPLICATION_MEDIA: applicationMedia,
+        PUBLIC_MEDIA: publicMedia,
         CLOUDFLARE_R2_PUBLIC_URL: R2_PUBLIC_URL,
         ASSETS: {
           fetch: async (assetInput: RequestInfo | URL, init?: RequestInit) => {
@@ -1613,6 +1619,8 @@ app.all(
     '/api/admin/official-document/preview',
     '/api/admin/official-document/issued',
     '/api/admin/official-document/assets',
+    '/api/admin/about-us/assets',
+    '/api/about-us/assets',
   ],
   dispatchWorkerApi,
 );

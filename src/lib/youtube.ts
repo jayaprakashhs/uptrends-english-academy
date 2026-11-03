@@ -28,9 +28,12 @@ export function extractYouTubeId(urlOrId?: string | null): string | null {
 /**
  * Returns the highest resolution available thumbnail with automatic fallbacks.
  */
-export function getYouTubeThumbnail(videoId: string | null): string {
+export function getYouTubeThumbnail(
+  videoId: string | null,
+  quality: 'hqdefault' | 'maxresdefault' = 'hqdefault',
+): string {
   if (!videoId) {
     return 'https://images.unsplash.com/photo-1524178232363-1fb2b075b655?auto=format&fit=crop&w=1200&q=80';
   }
-  return `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
+  return `https://img.youtube.com/vi/${videoId}/${quality}.jpg`;
 }

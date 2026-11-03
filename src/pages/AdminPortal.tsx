@@ -52,10 +52,12 @@ import {
   GraduationCap,
   Timer,
   TrendingUp,
+  UserCog,
 } from 'lucide-react';
 import { extractYouTubeId } from '../lib/youtube';
 import { fetchSystemStatus, type IntegrationHealth, type SystemStatus } from '../lib/systemStatus';
 import { AdminDemoClassRequests } from '../components/AdminDemoClassRequests';
+import { AboutUsManagement } from '../components/AboutUsManagement';
 
 interface AdminPortalProps {
   currentAdmin: AdminProfile;
@@ -1512,6 +1514,7 @@ const res = await fetchAdmin(url, {
     { id: 'announcements', label: 'Announcements', icon: Volume2, minRole: 'admin' },
     { id: 'branding', label: 'Site Branding & Assets', icon: Palette, minRole: 'admin' },
     { id: 'faqs', label: 'FAQs Management', icon: HelpCircle, minRole: 'super_admin' },
+    { id: 'about-us', label: 'About Us Management', icon: UserCog, minRole: 'super_admin' },
     { id: 'notifications', label: 'Email History', icon: Send, minRole: 'super_admin' },
     { id: 'roles', label: 'Admin Roles & Access', icon: ShieldCheck, minRole: 'super_admin' },
     { id: 'settings', label: 'Settings & PDF Config', icon: Settings, minRole: 'super_admin' },
@@ -3417,6 +3420,10 @@ const res = await fetchAdmin(url, {
                 </div>
               )}
             </div>
+          )}
+
+          {activeTab === 'about-us' && isSuperAdmin && (
+            <AboutUsManagement currentAdmin={currentAdmin} />
           )}
 
           {/* TAB: ADMIN ROLES & ACCESS (SUPER ADMIN ONLY) */}

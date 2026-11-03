@@ -11,12 +11,17 @@ function mockR2Bucket(
 ) {
   const puts: Array<{ key: string; value: ArrayBuffer | ArrayBufferView; options?: { httpMetadata?: { contentType?: string } } }> = [];
   const deletes: string[] = [];
+  const objects = new Map<string, { bytes: Uint8Array; contentType?: string }>();
   let listCount = 0;
   return {
     binding: {
       put: async (key: string, value: ArrayBuffer | ArrayBufferView, putOptions?: { httpMetadata?: { contentType?: string } }) => {
         if (options.putError) throw new Error('mock R2 put failure');
         puts.push({ key, value, options: putOptions });
+        const bytes = value instanceof ArrayBuffer
+          ? new Uint8Array(value)
+          : new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+        objects.set(key, { bytes: bytes.slice(), contentType: putOptions?.httpMetadata?.contentType });
       },
       delete: async (key: string) => {
         deletes.push(key);
@@ -24,6 +29,21 @@ function mockR2Bucket(
         if (options.deleteError || (options.deleteFailures && deletes.length <= options.deleteFailures)) {
           throw new Error('mock R2 delete failure');
         }
+        objects.delete(key);
+      },
+      get: async (key: string) => {
+        const object = objects.get(key);
+        if (!object) return null;
+        const bytes = object.bytes.slice();
+        return {
+          body: new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(bytes);
+              controller.close();
+            },
+          }),
+          httpMetadata: { contentType: object.contentType },
+        };
       },
       list: async () => {
         listCount += 1;
@@ -1964,4 +1984,184 @@ test('demo-class route allows POST and preserves the same-origin-only API policy
     {},
   );
   assert.equal(crossOrigin.status, 403);
+});
+
+test('About Us R2 image uploads require an active super admin', async () => {
+  const originalFetch = globalThis.fetch;
+  const applicationMedia = mockR2Bucket();
+  const publicMedia = mockR2Bucket();
+  let role: 'staff' | 'admin' | 'super_admin' = 'admin';
+  globalThis.fetch = async (input) => {
+    const path = new URL(input instanceof Request ? input.url : input.toString()).pathname;
+    if (path === '/auth/v1/user') return Response.json({ id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' });
+    if (path === '/rest/v1/admin_profiles') {
+      return Response.json({
+        id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        full_name: 'Test Admin',
+        role,
+        is_active: true,
+      });
+    }
+    throw new Error(`Unexpected Supabase request: ${path}`);
+  };
+
+  try {
+    const env = {
+      SUPABASE_URL: 'https://project.example',
+      SUPABASE_SERVICE_ROLE_KEY: 'test-service-role-key',
+      APPLICATION_MEDIA: applicationMedia.binding,
+      PUBLIC_MEDIA: publicMedia.binding,
+    };
+    for (const unauthorizedRole of ['staff', 'admin'] as const) {
+      role = unauthorizedRole;
+      const unauthorized = await handleApiRequest(new Request('https://academy.example/api/admin/about-us/assets', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer test-user-token', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ asset_type: 'instructor', image_file_base64: 'data:image/jpeg;base64,/9j/2Q==' }),
+      }), env);
+      assert.equal(unauthorized.status, 403, unauthorizedRole);
+    }
+    assert.equal(applicationMedia.puts.length, 0);
+    assert.equal(publicMedia.puts.length, 0);
+
+    role = 'super_admin';
+    const upload = await handleApiRequest(new Request('https://academy.example/api/admin/about-us/assets', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer test-user-token', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ asset_type: 'instructor', image_file_base64: 'data:image/jpeg;base64,/9j/2Q==' }),
+    }), env);
+    assert.equal(upload.status, 200);
+    const body = await upload.json() as { object_key: string; content_type: string; size_bytes: number };
+    assert.match(body.object_key, /^about-us\/instructors\/[0-9a-f-]+\.jpg$/i);
+    assert.equal(body.content_type, 'image/jpeg');
+    assert.equal(body.size_bytes, 4);
+    assert.equal(applicationMedia.puts[0].options?.httpMetadata?.contentType, 'image/jpeg');
+    assert.equal(publicMedia.puts.length, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('public About Us image reads verify a published database reference before reading R2', async () => {
+  const originalFetch = globalThis.fetch;
+  const applicationMedia = mockR2Bucket();
+  const publicMedia = mockR2Bucket();
+  const objectKey = 'about-us/instructors/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.jpg';
+  await applicationMedia.binding.put(objectKey, new Uint8Array([0xff, 0xd8, 0xff, 0xd9]), {
+    httpMetadata: { contentType: 'image/jpeg' },
+  });
+  await publicMedia.binding.put(objectKey, new Uint8Array([0xff, 0xd8, 0x00, 0xd9]), {
+    httpMetadata: { contentType: 'image/jpeg' },
+  });
+  let publishedFilter = false;
+  globalThis.fetch = async (input) => {
+    const requestUrl = new URL(input instanceof Request ? input.url : input.toString());
+    if (requestUrl.pathname === '/rest/v1/team_members') {
+      publishedFilter = requestUrl.searchParams.get('is_published') === 'eq.true'
+        && requestUrl.searchParams.get('photo_object_key') === `eq.${objectKey}`;
+      return Response.json({ id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' });
+    }
+    throw new Error(`Unexpected Supabase request: ${requestUrl.pathname}`);
+  };
+
+  try {
+    const response = await handleApiRequest(
+      new Request(`https://academy.example/api/about-us/assets?key=${encodeURIComponent(objectKey)}`),
+      {
+        SUPABASE_URL: 'https://project.example',
+        VITE_SUPABASE_ANON_KEY: 'test-anon-key',
+        APPLICATION_MEDIA: applicationMedia.binding,
+        PUBLIC_MEDIA: publicMedia.binding,
+      },
+    );
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('Content-Type'), 'image/jpeg');
+    assert.equal(publishedFilter, true);
+    assert.deepEqual(new Uint8Array(await response.arrayBuffer()), new Uint8Array([0xff, 0xd8, 0xff, 0xd9]));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('About Us R2 image deletion refuses objects still referenced by content', async () => {
+  const originalFetch = globalThis.fetch;
+  const applicationMedia = mockR2Bucket();
+  const publicMedia = mockR2Bucket();
+  const objectKey = 'about-us/instructors/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.jpg';
+  globalThis.fetch = async (input) => {
+    const requestUrl = new URL(input instanceof Request ? input.url : input.toString());
+    if (requestUrl.pathname === '/auth/v1/user') {
+      return Response.json({ id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' });
+    }
+    if (requestUrl.pathname === '/rest/v1/admin_profiles') {
+      return Response.json({
+        id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        full_name: 'Test Admin',
+        role: 'super_admin',
+        is_active: true,
+      });
+    }
+    if (requestUrl.pathname === '/rest/v1/team_members') {
+      return Response.json([{ id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' }]);
+    }
+    if (requestUrl.pathname === '/rest/v1/about_us_video_configurations') return Response.json([]);
+    throw new Error(`Unexpected Supabase request: ${requestUrl.pathname}`);
+  };
+
+  try {
+    const response = await handleApiRequest(new Request(
+      `https://academy.example/api/admin/about-us/assets?key=${encodeURIComponent(objectKey)}`,
+      { method: 'DELETE', headers: { Authorization: 'Bearer test-user-token' } },
+    ), {
+      SUPABASE_URL: 'https://project.example',
+      SUPABASE_SERVICE_ROLE_KEY: 'test-service-role-key',
+      APPLICATION_MEDIA: applicationMedia.binding,
+      PUBLIC_MEDIA: publicMedia.binding,
+    });
+    assert.equal(response.status, 409);
+    assert.equal(publicMedia.deletes.length, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('About Us image deletion uses private APPLICATION_MEDIA only', async () => {
+  const originalFetch = globalThis.fetch;
+  const applicationMedia = mockR2Bucket();
+  const publicMedia = mockR2Bucket();
+  const objectKey = 'about-us/video-posters/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.webp';
+  globalThis.fetch = async (input) => {
+    const requestUrl = new URL(input instanceof Request ? input.url : input.toString());
+    if (requestUrl.pathname === '/auth/v1/user') {
+      return Response.json({ id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' });
+    }
+    if (requestUrl.pathname === '/rest/v1/admin_profiles') {
+      return Response.json({
+        id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        full_name: 'Test Super Admin',
+        role: 'super_admin',
+        is_active: true,
+      });
+    }
+    if (requestUrl.pathname === '/rest/v1/team_members') return Response.json([]);
+    if (requestUrl.pathname === '/rest/v1/about_us_video_configurations') return Response.json([]);
+    throw new Error(`Unexpected Supabase request: ${requestUrl.pathname}`);
+  };
+
+  try {
+    const response = await handleApiRequest(new Request(
+      `https://academy.example/api/admin/about-us/assets?key=${encodeURIComponent(objectKey)}`,
+      { method: 'DELETE', headers: { Authorization: 'Bearer test-user-token' } },
+    ), {
+      SUPABASE_URL: 'https://project.example',
+      SUPABASE_SERVICE_ROLE_KEY: 'test-service-role-key',
+      APPLICATION_MEDIA: applicationMedia.binding,
+      PUBLIC_MEDIA: publicMedia.binding,
+    });
+    assert.equal(response.status, 200);
+    assert.deepEqual(applicationMedia.deletes, [objectKey]);
+    assert.equal(publicMedia.deletes.length, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });

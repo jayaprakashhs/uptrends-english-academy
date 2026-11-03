@@ -122,8 +122,10 @@ export interface TeamMember {
   id: string;
   full_name: string;
   designation: string;
+  qualifications?: string | null;
   bio: string;
   photo_url?: string | null;
+  photo_object_key?: string | null;
   is_published: boolean;
   display_order: number;
 }

@@ -57,6 +57,7 @@ const MAX_BRANDING_LOGO_HERO_IMAGE_BYTES = 3 * 1024 * 1024;
 const MAX_PASSPORT_BYTES = MAX_APPLICATION_PHOTO_BYTES;
 const ROLE_RANK: Record<string, number> = { staff: 1, admin: 2, super_admin: 3 };
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const ABOUT_US_OBJECT_KEY_PATTERN = /^about-us\/(?:instructors|video-posters)\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(?:jpg|png|webp)$/i;
 
 const json = (body: unknown, status = 200, headers: Record<string, string> = {}) =>
   new Response(JSON.stringify(body), {
@@ -304,6 +305,110 @@ const optionalString = (value: unknown, field: string, maxLength = 5000): string
 };
 
 const isResponse = (value: unknown): value is Response => value instanceof Response;
+
+const isAboutUsObjectKey = (value: unknown): value is string =>
+  typeof value === 'string' && ABOUT_US_OBJECT_KEY_PATTERN.test(value);
+
+const readAboutUsAsset = async (
+  env: Env,
+  objectKey: string,
+  isPublic: boolean,
+): Promise<Response> => {
+  const bucket = env.APPLICATION_MEDIA;
+  if (!bucket?.get) return errorResponse('Private application R2 storage is not configured.', 503);
+
+  if (isPublic) {
+    const supabase = getSupabaseClient(env, false, 'public.about_us_asset.read');
+    if (!supabase) return errorResponse('Supabase is not configured.', 503);
+    const isInstructorPhoto = objectKey.startsWith('about-us/instructors/');
+    const { data, error } = isInstructorPhoto
+      ? await supabase
+        .from('team_members')
+        .select('id')
+        .eq('photo_object_key', objectKey)
+        .eq('is_published', true)
+        .limit(1)
+        .maybeSingle()
+      : await supabase
+        .from('about_us_video_configurations')
+        .select('id')
+        .eq('poster_object_key', objectKey)
+        .eq('is_published', true)
+        .limit(1)
+        .maybeSingle();
+    if (error) return errorResponse('Unable to verify published About Us image access.', 500);
+    if (!data) return errorResponse('Image not found.', 404);
+  }
+
+  try {
+    const object = await bucket.get(objectKey);
+    if (!object?.body) return errorResponse('Image not found.', 404);
+    const contentType = object.httpMetadata?.contentType;
+    if (!contentType || !['image/jpeg', 'image/png', 'image/webp'].includes(contentType)) {
+      return errorResponse('Stored image has invalid content metadata.', 500);
+    }
+    return new Response(object.body, {
+      headers: {
+        'Content-Type': contentType,
+        'Cache-Control': 'no-store',
+        'X-Content-Type-Options': 'nosniff',
+      },
+    });
+  } catch (error) {
+    console.error('Unable to read About Us image from R2.', {
+      operation: isPublic ? 'public.about_us_asset.read' : 'admin.about_us_asset.preview',
+      error_category: 'r2_read_failed',
+    });
+    return errorResponse('Unable to read the image from R2.', 502);
+  }
+};
+
+const uploadAboutUsAsset = async (request: Request, env: Env): Promise<Response> => {
+  const auth = await requireAdmin(request, env, 'super_admin');
+  if (isResponse(auth)) return auth;
+  const bucket = env.APPLICATION_MEDIA;
+  if (!bucket) return errorResponse('Private application R2 storage is not configured.', 503);
+
+  const body = await parseJson(request);
+  if (isResponse(body)) return body;
+  if (body.asset_type !== 'instructor' && body.asset_type !== 'poster') {
+    return errorResponse('Asset type must be instructor or poster.', 400);
+  }
+  const image = decodeImage(body.image_file_base64, MAX_MEDIA_BYTES);
+  if (isResponse(image)) return image;
+
+  const folder = body.asset_type === 'instructor' ? 'instructors' : 'video-posters';
+  const extension = image.mime === 'image/png' ? 'png' : image.mime === 'image/webp' ? 'webp' : 'jpg';
+  const objectKey = `about-us/${folder}/${crypto.randomUUID()}.${extension}`;
+  try {
+    await bucket.put(objectKey, image.bytes, { httpMetadata: { contentType: image.mime } });
+  } catch {
+    return errorResponse('R2 image upload failed.', 502);
+  }
+  return json({ object_key: objectKey, content_type: image.mime, size_bytes: image.bytes.byteLength });
+};
+
+const deleteAboutUsAsset = async (env: Env, supabase: SupabaseClient, objectKey: string): Promise<Response> => {
+  const [instructorReference, videoReference] = await Promise.all([
+    supabase.from('team_members').select('id').eq('photo_object_key', objectKey).limit(1),
+    supabase.from('about_us_video_configurations').select('id').eq('poster_object_key', objectKey).limit(1),
+  ]);
+  if (instructorReference.error || videoReference.error) {
+    return errorResponse('Unable to verify whether the image is still in use.', 500);
+  }
+  if ((instructorReference.data?.length || 0) > 0 || (videoReference.data?.length || 0) > 0) {
+    return errorResponse('The image is still referenced by About Us content.', 409);
+  }
+
+  const bucket = env.APPLICATION_MEDIA;
+  if (!bucket) return errorResponse('Private application R2 storage is not configured.', 503);
+  try {
+    await bucket.delete(objectKey);
+    return json({ success: true });
+  } catch {
+    return errorResponse('R2 image deletion failed.', 502);
+  }
+};
 
 const withApplicationErasureWriteLease = async <T>(
   supabase: SupabaseClient,
@@ -4227,6 +4332,24 @@ export async function handleApiRequest(request: Request, env: Env): Promise<Resp
       if (error) return errorResponse(`Unable to read branding: ${error.message}`, 500);
       return json(data || {});
     }
+    if (pathname === '/api/about-us/assets') {
+      if (method !== 'GET') return methodNotAllowed(['GET']);
+      const objectKey = new URL(request.url).searchParams.get('key');
+      if (!isAboutUsObjectKey(objectKey)) return errorResponse('Invalid About Us image key.', 400);
+      return readAboutUsAsset(env, objectKey, true);
+    }
+    if (pathname === '/api/admin/about-us/assets') {
+      if (method === 'POST') return uploadAboutUsAsset(request, env);
+      if (method === 'GET' || method === 'DELETE') {
+        const auth = await requireAdmin(request, env, 'super_admin');
+        if (isResponse(auth)) return auth;
+        const objectKey = new URL(request.url).searchParams.get('key');
+        if (!isAboutUsObjectKey(objectKey)) return errorResponse('Invalid About Us image key.', 400);
+        if (method === 'GET') return readAboutUsAsset(env, objectKey, false);
+        return deleteAboutUsAsset(env, auth.supabase, objectKey);
+      }
+      return methodNotAllowed(['GET', 'POST', 'DELETE']);
+    }
 
     if (pathname === '/api/apply' && method === 'POST') return submitApplication(request, env);
     if (pathname === '/api/demo-class-requests' && method === 'POST') return submitDemoClassRequest(request, env);
@@ -4451,6 +4574,8 @@ export async function handleApiRequest(request: Request, env: Env): Promise<Resp
         '/api/media': ['GET'],
         '/api/faqs': ['GET'],
         '/api/branding': ['GET'],
+        '/api/about-us/assets': ['GET'],
+        '/api/admin/about-us/assets': ['GET', 'POST', 'DELETE'],
         '/api/apply': ['POST'],
         '/api/demo-class-requests': ['POST'],
         '/api/callback-request': ['POST'],

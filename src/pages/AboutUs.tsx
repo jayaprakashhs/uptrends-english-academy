@@ -1,29 +1,109 @@
-import React from 'react';
-import { TeamMember } from '../types';
+import React, { useEffect, useState } from 'react';
+import type { TeamMember } from '../types';
 import { Target, Compass, Heart, Play, Clock, MapPin, Phone, Mail, Award, CheckCircle } from 'lucide-react';
 import { getYouTubeThumbnail, extractYouTubeId } from '../lib/youtube';
+import { supabase } from '../lib/supabase';
 
 interface AboutUsProps {
-  teamMembers: TeamMember[];
   openVideoModal: (url: string, title: string) => void;
   openCallbackModal: () => void;
   setCurrentPage: (page: string) => void;
 }
 
+const DEFAULT_VIDEO_URL = 'https://www.youtube.com/watch?v=ScMzIvxBSi4';
+const publicAboutUsAssetUrl = (objectKey: string) =>
+  `/api/about-us/assets?key=${encodeURIComponent(objectKey)}`;
+
 export const AboutUs: React.FC<AboutUsProps> = ({
-  teamMembers,
   openVideoModal,
   openCallbackModal,
   setCurrentPage,
 }) => {
-  const publishedTeam = teamMembers.filter((m) => m.is_published);
+  const [publishedTeam, setPublishedTeam] = useState<TeamMember[]>([]);
+  const [instructorsLoading, setInstructorsLoading] = useState(true);
+  const [instructorError, setInstructorError] = useState<string | null>(null);
+  const [instructorAssetWarning, setInstructorAssetWarning] = useState<string | null>(null);
+  const [videoLoading, setVideoLoading] = useState(true);
+  const [videoError, setVideoError] = useState<string | null>(null);
+  const [teamTalkUrl, setTeamTalkUrl] = useState(DEFAULT_VIDEO_URL);
+  const [videoPosterUrl, setVideoPosterUrl] = useState<string | null>(null);
+  const teamTalkVideoId = extractYouTubeId(teamTalkUrl);
+  const teamTalkThumb = videoPosterUrl
+    || getYouTubeThumbnail(teamTalkVideoId, 'maxresdefault');
 
-  // Approved YouTube introduction URLs (Managed by admin)
-  const teamTalkUrl = 'https://www.youtube.com/watch?v=ScMzIvxBSi4';
-  const recentBatchUrl = 'https://www.youtube.com/watch?v=ScMzIvxBSi4';
+  useEffect(() => {
+    let active = true;
+    const loadAboutContent = async () => {
+      const client = supabase;
+      if (!client) {
+        setInstructorError('Instructor profiles could not be loaded.');
+        setVideoError('The video configuration could not be loaded; the default introduction is shown.');
+        setInstructorsLoading(false);
+        setVideoLoading(false);
+        return;
+      }
 
-  const teamTalkThumb = getYouTubeThumbnail(extractYouTubeId(teamTalkUrl));
-  const recentBatchThumb = getYouTubeThumbnail(extractYouTubeId(recentBatchUrl));
+      const [instructorResult, videoResult] = await Promise.all([
+        client
+          .from('team_members')
+          .select('id, full_name, designation, qualifications, bio, photo_object_key, is_published, display_order')
+          .eq('is_published', true)
+          .order('display_order', { ascending: true })
+          .order('created_at', { ascending: true }),
+        client
+          .from('about_us_video_configurations')
+          .select('youtube_url, poster_object_key')
+          .eq('id', true)
+          .eq('is_published', true)
+          .maybeSingle(),
+      ]);
+
+      if (!active) return;
+      if (instructorResult.error) {
+        setInstructorError('Instructor profiles could not be loaded.');
+      } else {
+        const instructors = (instructorResult.data || []) as Array<TeamMember & { photo_object_key?: string | null }>;
+        setPublishedTeam(instructors.map((instructor) => ({
+          ...instructor,
+          photo_url: instructor.photo_object_key
+            ? publicAboutUsAssetUrl(instructor.photo_object_key)
+            : null,
+        })));
+        setInstructorError(null);
+        setInstructorAssetWarning(null);
+      }
+      if (videoResult.error) {
+        setVideoError('The video configuration could not be loaded; the default introduction is shown.');
+      } else if (videoResult.data) {
+        if (!extractYouTubeId(videoResult.data.youtube_url)) {
+          setVideoError('The saved video URL is invalid; the default introduction is shown.');
+        } else {
+          setTeamTalkUrl(videoResult.data.youtube_url);
+          setVideoPosterUrl(videoResult.data.poster_object_key
+            ? publicAboutUsAssetUrl(videoResult.data.poster_object_key)
+            : null);
+          setVideoError(null);
+        }
+      } else {
+        setVideoError(null);
+      }
+      setInstructorsLoading(false);
+      setVideoLoading(false);
+    };
+
+    void loadAboutContent().catch((error: unknown) => {
+      if (!active) return;
+      console.error('Unable to load public About Us content.', error);
+      setInstructorError('Instructor profiles could not be loaded.');
+      setVideoError('The video configuration could not be loaded; the default introduction is shown.');
+      setInstructorsLoading(false);
+      setVideoLoading(false);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   return (
     <div className="space-y-16 py-12">
@@ -42,7 +122,66 @@ export const AboutUs: React.FC<AboutUsProps> = ({
         </div>
       </section>
 
-      {/* 2. Our Philosophy (Vision, Mission, Values) */}
+      {/* 2. Meet Our Team (Admin managed, no invented staff) */}
+      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="text-center max-w-2xl mx-auto mb-10">
+          <span className="text-xs font-bold uppercase tracking-wider text-emerald-600">
+            Academic Mentors
+          </span>
+          <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-950 mt-1">
+            Meet Our Instructors
+          </h2>
+          <p className="text-xs text-slate-600 mt-1">
+            Experienced mentors dedicated to student progress and spoken English excellence.
+          </p>
+        </div>
+
+        {instructorsLoading ? (
+          <p role="status" className="text-center text-sm text-slate-500">Loading instructor profiles…</p>
+        ) : instructorError ? (
+          <p role="status" className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-center text-sm text-amber-800">{instructorError}</p>
+        ) : publishedTeam.length > 0 ? (
+          <>
+            {instructorAssetWarning && (
+              <p role="status" className="mb-4 text-center text-xs text-amber-700">{instructorAssetWarning}</p>
+            )}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+              {publishedTeam.map((member) => (
+                <div key={member.id} className="bg-white rounded-2xl border border-slate-200 p-6 text-center shadow-xs">
+                  {member.photo_url ? (
+                    <img
+                      src={member.photo_url}
+                      alt={member.full_name}
+                      className="w-24 h-24 rounded-full mx-auto object-cover mb-4 border-2 border-orange-500"
+                    />
+                  ) : (
+                    <div className="w-24 h-24 rounded-full bg-orange-100 text-orange-600 font-bold text-2xl flex items-center justify-center mx-auto mb-4 border-2 border-orange-300">
+                      {member.full_name.charAt(0)}
+                    </div>
+                  )}
+                  <h3 className="font-bold text-slate-900 text-lg">{member.full_name}</h3>
+                  <p className="text-xs text-orange-600 font-semibold mb-3">{member.designation}</p>
+                  {member.qualifications && (
+                    <p className="text-xs text-slate-500 mb-2">{member.qualifications}</p>
+                  )}
+                  <p className="text-xs text-slate-600 leading-relaxed">{member.bio}</p>
+                </div>
+              ))}
+            </div>
+          </>
+        ) : (
+          <div className="bg-slate-50 border border-slate-200 rounded-2xl p-8 text-center max-w-xl mx-auto">
+            <p className="text-sm font-semibold text-slate-700">
+              Instructor profiles are managed through the secure academy portal.
+            </p>
+            <p className="text-xs text-slate-500 mt-1">
+              Visit our center at Ram And Co Circle to meet our faculty in person.
+            </p>
+          </div>
+        )}
+      </section>
+
+      {/* 3. Our Philosophy (Vision, Mission, Values) */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="text-center max-w-2xl mx-auto mb-10">
           <span className="text-xs font-bold uppercase tracking-wider text-emerald-600">
@@ -107,7 +246,7 @@ export const AboutUs: React.FC<AboutUsProps> = ({
         </div>
       </section>
 
-      {/* 3. Our Journey (25+ years of dedicated training) */}
+      {/* 4. Our Journey (25+ years of dedicated training) */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="bg-slate-900 text-white rounded-3xl p-8 sm:p-12 border border-slate-800 shadow-xl">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
@@ -142,9 +281,9 @@ export const AboutUs: React.FC<AboutUsProps> = ({
         </div>
       </section>
 
-      {/* 4. Our Team Talk & Hear from Our Recent Batch (YouTube Embeds) */}
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="text-center max-w-2xl mx-auto mb-10">
+      {/* 5. Academy In Action video introduction */}
+      <section className="mx-auto flex h-[calc(100svh-6rem)] w-full max-w-7xl flex-col px-4 py-2 sm:px-6 lg:h-[calc(100svh-8rem)] lg:px-8 lg:py-2">
+        <div className="shrink-0 text-center">
           <span className="text-xs font-bold uppercase tracking-wider text-orange-600">
             Academy In Action
           </span>
@@ -152,114 +291,46 @@ export const AboutUs: React.FC<AboutUsProps> = ({
             Video Introductions
           </h2>
           <p className="text-xs text-slate-600 mt-1">
-            Watch our introductory video and hear thoughts from recent learners.
+            Explore our training approach, spoken practice modules, and teaching philosophy.
           </p>
+          {videoLoading && (
+            <p role="status" className="mt-2 text-xs text-slate-500">Loading saved video configuration…</p>
+          )}
+          {videoError && (
+            <p role="status" className="mt-2 text-xs text-amber-700">{videoError}</p>
+          )}
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-          {/* Video 1: Our Team Talk */}
-          <div className="bg-white rounded-2xl overflow-hidden border border-slate-200/80 shadow-md">
-            <div
-              className="relative aspect-video bg-slate-900 cursor-pointer group"
+        <div className="mt-6 flex min-h-0 flex-1 items-center justify-center">
+          <div
+            className="relative aspect-video max-w-full overflow-hidden rounded-2xl border border-slate-200/80 bg-[#fff8ef] shadow-md"
+            style={{ width: 'min(100%, calc((100svh - 10rem) * 16 / 9))' }}
+          >
+            <button
+              type="button"
+              className="group absolute inset-0 flex h-full w-full cursor-pointer items-center justify-center"
               onClick={() => openVideoModal(teamTalkUrl, 'Academy Introduction — Our Team Talk')}
+              aria-label="Play Academy Introduction video"
             >
               <img
                 src={teamTalkThumb}
                 alt="Our Team Talk Video Cover"
-                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                className="absolute inset-0 h-full w-full object-contain"
+                onError={() => {
+                  if (videoPosterUrl) setVideoPosterUrl(null);
+                }}
               />
-              <div className="absolute inset-0 bg-black/40 group-hover:bg-black/25 transition-colors flex items-center justify-center">
-                <div className="w-16 h-16 rounded-full bg-orange-600 text-white flex items-center justify-center shadow-xl group-hover:scale-110 transition-transform">
+              <div className="absolute inset-0 bg-black/40 transition-colors group-hover:bg-black/25 flex items-center justify-center">
+                <div className="w-16 h-16 rounded-full bg-orange-600 text-white flex items-center justify-center shadow-xl transition-transform group-hover:scale-110">
                   <Play className="w-6 h-6 fill-current ml-1" />
                 </div>
               </div>
               <div className="absolute bottom-3 left-3 bg-black/70 px-2.5 py-1 rounded text-white text-xs font-semibold">
                 Introduction Video
               </div>
-            </div>
-            <div className="p-6">
-              <h3 className="text-lg font-bold text-slate-900 mb-1">Our Team Talk</h3>
-              <p className="text-xs text-slate-600 leading-relaxed">
-                An introduction to our training approach, spoken practice modules, and teaching philosophy at Uptrend’s English Academy.
-              </p>
-            </div>
-          </div>
-
-          {/* Video 2: Hear from Our Recent Batch */}
-          <div className="bg-white rounded-2xl overflow-hidden border border-slate-200/80 shadow-md">
-            <div
-              className="relative aspect-video bg-slate-900 cursor-pointer group"
-              onClick={() => openVideoModal(recentBatchUrl, 'Hear from Our Recent Batch')}
-            >
-              <img
-                src={recentBatchThumb}
-                alt="Hear from Our Recent Batch Video Cover"
-                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-              />
-              <div className="absolute inset-0 bg-black/40 group-hover:bg-black/25 transition-colors flex items-center justify-center">
-                <div className="w-16 h-16 rounded-full bg-emerald-600 text-white flex items-center justify-center shadow-xl group-hover:scale-110 transition-transform">
-                  <Play className="w-6 h-6 fill-current ml-1" />
-                </div>
-              </div>
-              <div className="absolute bottom-3 left-3 bg-black/70 px-2.5 py-1 rounded text-white text-xs font-semibold">
-                Learner Perspective
-              </div>
-            </div>
-            <div className="p-6">
-              <h3 className="text-lg font-bold text-slate-900 mb-1">Hear from Our Recent Batch</h3>
-              <p className="text-xs text-slate-600 leading-relaxed">
-                Approved video impressions shared by learners after completing their spoken English training modules in Davangere.
-              </p>
-            </div>
+            </button>
           </div>
         </div>
-      </section>
-
-      {/* 5. Meet Our Team (Admin managed, no invented staff) */}
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="text-center max-w-2xl mx-auto mb-10">
-          <span className="text-xs font-bold uppercase tracking-wider text-emerald-600">
-            Academic Mentors
-          </span>
-          <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-950 mt-1">
-            Meet Our Instructors
-          </h2>
-          <p className="text-xs text-slate-600 mt-1">
-            Experienced mentors dedicated to student progress and spoken English excellence.
-          </p>
-        </div>
-
-        {publishedTeam.length > 0 ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            {publishedTeam.map((member) => (
-              <div key={member.id} className="bg-white rounded-2xl border border-slate-200 p-6 text-center shadow-xs">
-                {member.photo_url ? (
-                  <img
-                    src={member.photo_url}
-                    alt={member.full_name}
-                    className="w-24 h-24 rounded-full mx-auto object-cover mb-4 border-2 border-orange-500"
-                  />
-                ) : (
-                  <div className="w-24 h-24 rounded-full bg-orange-100 text-orange-600 font-bold text-2xl flex items-center justify-center mx-auto mb-4 border-2 border-orange-300">
-                    {member.full_name.charAt(0)}
-                  </div>
-                )}
-                <h3 className="font-bold text-slate-900 text-lg">{member.full_name}</h3>
-                <p className="text-xs text-orange-600 font-semibold mb-3">{member.designation}</p>
-                <p className="text-xs text-slate-600 leading-relaxed">{member.bio}</p>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="bg-slate-50 border border-slate-200 rounded-2xl p-8 text-center max-w-xl mx-auto">
-            <p className="text-sm font-semibold text-slate-700">
-              Instructor profiles are managed through the secure academy portal.
-            </p>
-            <p className="text-xs text-slate-500 mt-1">
-              Visit our center at Ram And Co Circle to meet our faculty in person.
-            </p>
-          </div>
-        )}
       </section>
 
       {/* 6. Contact Details & Business Hours */}

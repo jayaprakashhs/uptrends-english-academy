@@ -21,7 +21,7 @@ import { NotFound } from './pages/NotFound';
 import { fetchPublicJson, getPublicApiErrorMessage, PublicApiError } from './lib/publicApi';
 import { supabase } from './lib/supabase';
 
-import { Program, MediaItem, TeamMember, FAQ, AdminProfile, SiteBranding } from './types';
+import { Program, MediaItem, FAQ, AdminProfile, SiteBranding } from './types';
 
 type PublicResource = 'branding' | 'programs' | 'media' | 'faqs';
 type PublicResourceStatus = { loading: boolean; error: string | null };
@@ -82,7 +82,6 @@ export function App() {
   const [programs, setPrograms] = useState<Program[]>([]);
   const [mediaItems, setMediaItems] = useState<MediaItem[]>([]);
   const [faqs, setFaqs] = useState<FAQ[]>([]);
-  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [branding, setBranding] = useState<SiteBranding | null>(null);
   const [publicStatuses, setPublicStatuses] = useState<PublicResourceStatuses>(emptyPublicStatuses);
 
@@ -299,7 +298,6 @@ export function App() {
 
         {currentPage === 'about' && (
           <AboutUs
-            teamMembers={teamMembers}
             openVideoModal={openVideoModal}
             openCallbackModal={openCallbackModal}
             setCurrentPage={setCurrentPage}
