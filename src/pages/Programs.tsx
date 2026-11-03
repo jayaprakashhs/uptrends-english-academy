@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
 import { Program } from '../types';
-import { Users, Clock, Compass, PhoneCall, ArrowRight, Search, CheckCircle } from 'lucide-react';
+import { Users, Clock, Compass, PhoneCall, CalendarDays, Search, CheckCircle } from 'lucide-react';
 
 interface ProgramsProps {
   programs: Program[];
   setSelectedProgram: (program: Program) => void;
   setCurrentPage: (page: string) => void;
   openCallbackModal: (programName?: string) => void;
+  openDemoClassModal: () => void;
 }
 
 export const Programs: React.FC<ProgramsProps> = ({
@@ -14,6 +15,7 @@ export const Programs: React.FC<ProgramsProps> = ({
   setSelectedProgram,
   setCurrentPage,
   openCallbackModal,
+  openDemoClassModal,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedLevel, setSelectedLevel] = useState<string>('all');
@@ -36,12 +38,6 @@ export const Programs: React.FC<ProgramsProps> = ({
   const handleViewDetails = (prog: Program) => {
     setSelectedProgram(prog);
     setCurrentPage('program-details');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
-
-  const handleApply = (prog: Program) => {
-    setSelectedProgram(prog);
-    setCurrentPage('apply');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -163,11 +159,11 @@ export const Programs: React.FC<ProgramsProps> = ({
                     </div>
 
                     <button
-                      onClick={() => handleApply(prog)}
+                      onClick={openDemoClassModal}
                       className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-orange-600 to-orange-500 hover:from-orange-500 hover:to-orange-600 text-white text-xs font-bold text-center transition-all shadow-xs flex items-center justify-center gap-1.5 cursor-pointer"
                     >
-                      <span>Apply for Admission</span>
-                      <ArrowRight className="w-3.5 h-3.5" />
+                      <CalendarDays className="w-3.5 h-3.5" aria-hidden="true" />
+                      <span>Book Your Free Demo Class</span>
                     </button>
                   </div>
                 </div>

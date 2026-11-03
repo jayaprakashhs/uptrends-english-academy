@@ -312,6 +312,7 @@ export function App() {
             setSelectedProgram={setSelectedProgram}
             setCurrentPage={setCurrentPage}
             openCallbackModal={openCallbackModal}
+            openDemoClassModal={() => setDemoClassModalOpen(true)}
           />
         )}
 

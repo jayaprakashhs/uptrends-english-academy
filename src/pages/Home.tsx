@@ -378,7 +378,7 @@ export const Home: React.FC<HomeProps> = ({
                     data-program-slide
                     aria-roledescription="slide"
                     aria-label={`${index + 1} of ${publishedPrograms.length}: ${program.title}`}
-                    className={`group flex min-w-0 flex-[0_0_100%] shrink-0 snap-start flex-col overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm transition-all duration-300 hover:shadow-xl sm:flex-auto ${
+                    className={`group flex min-w-0 flex-[0_0_100%] shrink-0 snap-start flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-md transition-all duration-300 hover:shadow-lg sm:flex-auto ${
                       index >= 4 ? 'sm:hidden' : ''
                     }`}
                   >
@@ -435,10 +435,10 @@ export const Home: React.FC<HomeProps> = ({
                         <button
                           type="button"
                           onClick={openDemoClassModal}
-                          className="flex min-h-12 w-full min-w-0 items-center justify-center gap-2 rounded-xl border border-orange-500 bg-white px-4 py-3 text-center text-sm font-bold leading-snug text-orange-600 transition-colors transition-shadow duration-200 hover:bg-orange-600 hover:text-white hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-500 motion-reduce:transition-none"
+                          className="flex min-h-12 w-full min-w-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border border-orange-500 bg-white px-3 py-3 text-center text-xs font-bold leading-tight text-orange-600 transition-colors transition-shadow duration-200 hover:bg-orange-600 hover:text-white hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-500 motion-reduce:transition-none"
                         >
                           <CalendarDays className="h-4 w-4 shrink-0" aria-hidden="true" />
-                          <span className="min-w-0 break-words">Book Your Free Demo Class</span>
+                          <span className="whitespace-nowrap">Book Your Free Demo Class</span>
                         </button>
                       </div>
                     </div>
