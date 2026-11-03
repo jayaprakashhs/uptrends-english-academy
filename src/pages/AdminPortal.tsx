@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 
 import {
   DEFAULT_OFFICIAL_DOCUMENT_SETTINGS,
@@ -43,7 +43,6 @@ import {
   AlertTriangle,
   FileCheck,
   FileSpreadsheet,
-  Receipt,
   ChevronRight,
   Menu,
   X,
@@ -72,38 +71,6 @@ type BrandingImageField =
   | 'hero_photo_file_base64';
 
 type BrandingEditor = Partial<SiteBranding> & Partial<Record<BrandingImageField, string>>;
-
-type PaymentStage = 'first_payment' | 'second_payment' | 'installment' | 'final_payment';
-type SavedPaymentStage = PaymentStage | 'first_fee' | 'second_fee';
-type PaymentMethod = 'cash' | 'upi' | 'bank_transfer' | 'card' | 'cheque' | 'other';
-
-interface ApplicationPayment {
-  id: string;
-  application_id: string | null;
-  application_reference?: string;
-  student_id?: string | null;
-  student_name?: string;
-  student_email?: string | null;
-  student_mobile?: string | null;
-  program_name?: string;
-  amount: number;
-  payment_method: PaymentMethod;
-  payment_stage: SavedPaymentStage;
-  recorded_at: string;
-  reference_number: string | null;
-  notes: string | null;
-  recorded_by: string | null;
-  updated_by: string | null;
-  recorded_by_name?: string | null;
-  updated_by_name?: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-interface ApplicationPaymentData {
-  payments: ApplicationPayment[];
-  totalPaid: number;
-}
 
 type ProgramEditor = Partial<Program> & { image_file_base64?: string };
 
@@ -285,14 +252,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
   // Data states
   const [applications, setApplications] = useState<StudentApplication[]>([]);
-  const [archivedApplications, setArchivedApplications] = useState<StudentApplication[]>([]);
   const [applicationsLoading, setApplicationsLoading] = useState(false);
   const [applicationsError, setApplicationsError] = useState<string | null>(null);
   const [applicationDisplayLimit, setApplicationDisplayLimit] = useState(10);
-  const [registeredPayments, setRegisteredPayments] = useState<ApplicationPayment[]>([]);
-  const [paymentsLoading, setPaymentsLoading] = useState(false);
-  const [paymentsError, setPaymentsError] = useState<string | null>(null);
-  const [paymentsTruncated, setPaymentsTruncated] = useState(false);
   const [demoRequests, setDemoRequests] = useState<DashboardDemoRequest[]>([]);
   const [demoRefreshToken, setDemoRefreshToken] = useState(0);
   const [notifications, setNotifications] = useState<ApplicationNotification[]>([]);
@@ -392,7 +354,6 @@ useEffect(() => {
     setActiveTab(tab);
     setSidebarOpen(false);
     setActionMessage(null);
-    if (tab === 'payments') void loadPayments();
   };
 
   // Selected item modal preview states
@@ -406,19 +367,6 @@ useEffect(() => {
     message: string;
   } | null>(null);
   const [applicationJoiningInfo, setApplicationJoiningInfo] = useState<JoiningInformationSettings>({ ...DEFAULT_JOINING_INFORMATION });
-  const [paymentApp, setPaymentApp] = useState<StudentApplication | null>(null);
-  const [paymentData, setPaymentData] = useState<ApplicationPaymentData | null>(null);
-  const [paymentLoading, setPaymentLoading] = useState(false);
-  const [paymentSaving, setPaymentSaving] = useState(false);
-  const [receiptBusyId, setReceiptBusyId] = useState<string | null>(null);
-  const [paymentError, setPaymentError] = useState<string | null>(null);
-  const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null);
-  const [paymentAmountInput, setPaymentAmountInput] = useState('');
-  const [paymentMethodInput, setPaymentMethodInput] = useState<PaymentMethod>('upi');
-  const [paymentStageInput, setPaymentStageInput] = useState<PaymentStage>('first_payment');
-  const [paymentReferenceInput, setPaymentReferenceInput] = useState('');
-  const [paymentNotesInput, setPaymentNotesInput] = useState('');
-  const paymentCreationIntentRef = useRef<{ signature: string; key: string } | null>(null);
 
   const [selectedCallback, setSelectedCallback] = useState<CallbackRequest | null>(null);
   const [appPhotoModal, setAppPhotoModal] = useState<string | null>(null);
@@ -432,9 +380,7 @@ useEffect(() => {
 
   // Search and filter states
   const [appSearch, setAppSearch] = useState('');
-  const [paymentsSearch, setPaymentsSearch] = useState('');
   const [appFilterStatus, setAppFilterStatus] = useState<'All' | 'Pending' | 'Accepted'>('All');
-  const [applicationArchiveFilter, setApplicationArchiveFilter] = useState<'Active' | 'Archived'>('Active');
   const [callbackSearch, setCallbackSearch] = useState('');
   const [callbackFilterStatus, setCallbackFilterStatus] = useState<'All' | CallbackRequest['status']>('All');
   const [notifFilterStatus, setNotifFilterStatus] = useState<'All' | 'Pending' | 'Sent' | 'Failed'>('All');
@@ -477,209 +423,21 @@ useEffect(() => {
     return data;
   };
 
-  const loadApplicationPaymentData = async (app: StudentApplication) => {
-    setPaymentApp(app);
-    setPaymentData(null);
-    setPaymentError(null);
-    setPaymentLoading(true);
-    setEditingPaymentId(null);
-
-    try {
-      const data = await requestJson(
-        `/api/admin/applications/${encodeURIComponent(app.id)}/payments`,
-        { method: 'GET', headers: getAuthHeaders() },
-      );
-
-      setPaymentData(data as ApplicationPaymentData);
-    } catch (error) {
-      setPaymentError(
-        error instanceof Error ? error.message : 'Unable to load payment records.',
-      );
-    } finally {
-      setPaymentLoading(false);
-    }
-  };
-
-  const resetPaymentForm = () => {
-    paymentCreationIntentRef.current = null;
-    setEditingPaymentId(null);
-    setPaymentAmountInput('');
-    setPaymentMethodInput('upi');
-    setPaymentStageInput('first_payment');
-    setPaymentReferenceInput('');
-    setPaymentNotesInput('');
-  };
-
-  const generatePaymentReceipt = async (paymentId: string, sendEmail = false) => {
-    setReceiptBusyId(paymentId);
-    setPaymentError(null);
-    try {
-      await requestJson(`/api/admin/payments/${encodeURIComponent(paymentId)}/receipt`, {
-        method: 'POST',
-        headers: getAuthHeaders(),
-      });
-      if (sendEmail) {
-        await requestJson(`/api/admin/payments/${encodeURIComponent(paymentId)}/receipt/email`, {
-          method: 'POST',
-          headers: getAuthHeaders(),
-        });
-        setActionMessage({ type: 'success', text: 'Payment receipt emailed to the approved student.' });
-      } else {
-        const response = await fetchAdmin(`/api/admin/payments/${encodeURIComponent(paymentId)}/receipt/file`, {
-          headers: getAuthHeaders(),
-        });
-        if (!response.ok) throw new Error('Unable to download the payment receipt.');
-        const blobUrl = URL.createObjectURL(await response.blob());
-        const anchor = document.createElement('a');
-        anchor.href = blobUrl;
-        anchor.download = `Payment_Receipt_${paymentId}.pdf`;
-        document.body.appendChild(anchor);
-        anchor.click();
-        anchor.remove();
-        window.setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
-        setActionMessage({ type: 'success', text: 'Payment receipt downloaded.' });
-      }
-    } catch (error) {
-      setPaymentError(error instanceof Error ? error.message : 'Unable to process the payment receipt.');
-    } finally {
-      setReceiptBusyId(null);
-    }
-  };
-
-  const savePaymentEntry = async () => {
-    if ((!paymentApp && !editingPaymentId) || !isAdminOrHigher) return;
-
-    const amount = Number(paymentAmountInput);
-    if (!paymentAmountInput.trim() || !Number.isFinite(amount) || amount <= 0) {
-      setPaymentError('Enter a valid payment amount greater than zero.');
-      return;
-    }
-
-    setPaymentSaving(true);
-    setPaymentError(null);
-    try {
-      const isEditing = Boolean(editingPaymentId);
-      const url = isEditing
-        ? `/api/admin/payments/${encodeURIComponent(editingPaymentId as string)}`
-        : paymentApp
-          ? `/api/admin/applications/${encodeURIComponent(paymentApp.id)}/payments`
-          : '';
-      if (!url) throw new Error('Select an approved application before recording a payment.');
-      const paymentPayload = {
-        amount: Math.round(amount * 100) / 100,
-        payment_method: paymentMethodInput,
-        payment_stage: paymentStageInput,
-        reference_number: paymentReferenceInput.trim() || null,
-        notes: paymentNotesInput.trim() || null,
-      };
-      const headers = getAuthHeaders();
-      if (!isEditing) {
-        const signature = JSON.stringify(paymentPayload);
-        if (paymentCreationIntentRef.current?.signature !== signature) {
-          paymentCreationIntentRef.current = { signature, key: crypto.randomUUID() };
-        }
-        headers['Idempotency-Key'] = paymentCreationIntentRef.current.key;
-      }
-
-      const result = await requestJson(url, {
-        method: isEditing ? 'PUT' : 'POST',
-        headers,
-        body: JSON.stringify(paymentPayload),
-      });
-
-      resetPaymentForm();
-      if (paymentApp) await loadApplicationPaymentData(paymentApp);
-      else await loadPayments();
-      if (result?.document_update?.success === false) {
-        setPaymentError(
-          typeof result.document_update.error === 'string' && result.document_update.error
-            ? result.document_update.error
-            : 'Payment was saved, but its official PDF or email update could not be completed. It will not be retried automatically.',
-        );
-      }
-    } catch (error) {
-      setPaymentError(error instanceof Error ? error.message : 'Unable to save payment.');
-    } finally {
-      setPaymentSaving(false);
-    }
-  };
-
-  const beginEditPayment = (payment: ApplicationPayment) => {
-    setEditingPaymentId(payment.id);
-    setPaymentAmountInput(String(payment.amount));
-    setPaymentMethodInput(payment.payment_method);
-    setPaymentStageInput(payment.payment_stage === 'first_fee'
-      ? 'first_payment'
-      : payment.payment_stage === 'second_fee'
-        ? 'second_payment'
-        : payment.payment_stage);
-    setPaymentReferenceInput(payment.reference_number || '');
-    setPaymentNotesInput(payment.notes || '');
-    setPaymentError(null);
-  };
-
-  const removePaymentEntry = async (payment: ApplicationPayment) => {
-    if (!isAdminOrHigher) return;
-
-    const confirmed = window.confirm(
-      `Delete the payment of ₹${Number(payment.amount).toFixed(2)} recorded on ${new Date(payment.recorded_at).toLocaleString('en-IN')}? This action will be audited.`,
-    );
-    if (!confirmed) return;
-
-    setPaymentSaving(true);
-    setPaymentError(null);
-    try {
-      await requestJson(`/api/admin/payments/${encodeURIComponent(payment.id)}`, {
-        method: 'DELETE',
-        headers: getAuthHeaders(),
-      });
-      if (editingPaymentId === payment.id) resetPaymentForm();
-      if (paymentApp) await loadApplicationPaymentData(paymentApp);
-      else await loadPayments();
-    } catch (error) {
-      setPaymentError(error instanceof Error ? error.message : 'Unable to delete payment.');
-    } finally {
-      setPaymentSaving(false);
-    }
-  };
-
   const notifyPublicDataChanged = () => window.dispatchEvent(new Event('admin-data-updated'));
 
-  const loadApplications = async (includeArchived = applicationArchiveFilter === 'Archived'): Promise<boolean> => {
+  const loadApplications = async (): Promise<boolean> => {
     setApplicationsLoading(true);
     setApplicationsError(null);
     try {
-      const data = await requestJson(
-        includeArchived ? '/api/admin/applications?archived=true' : '/api/admin/applications',
-        { headers: getAuthHeaders() },
-      );
+      const data = await requestJson('/api/admin/applications', { headers: getAuthHeaders() });
       if (!Array.isArray(data)) throw new Error('The applications response was invalid.');
-      if (includeArchived) setArchivedApplications(data);
-      else setApplications(data);
+      setApplications(data);
       return true;
     } catch (error) {
       setApplicationsError(error instanceof Error ? error.message : 'Unable to load applications.');
       return false;
     } finally {
       setApplicationsLoading(false);
-    }
-  };
-
-  const loadPayments = async (search = paymentsSearch): Promise<boolean> => {
-    setPaymentsLoading(true);
-    setPaymentsError(null);
-    try {
-      const query = search.trim() ? `?search=${encodeURIComponent(search.trim())}` : '';
-      const data = await requestJson(`/api/admin/payments${query}`, { headers: getAuthHeaders() });
-      if (!data || !Array.isArray(data.payments)) throw new Error('The payments response was invalid.');
-      setRegisteredPayments(data.payments);
-      setPaymentsTruncated(data.truncated === true);
-      return true;
-    } catch (error) {
-      setPaymentsError(error instanceof Error ? error.message : 'Unable to load payment records.');
-      return false;
-    } finally {
-      setPaymentsLoading(false);
     }
   };
 
@@ -1100,48 +858,6 @@ const resetOfficialDocumentSettings = () => {
     setActionMessage(null);
   };
 
-  const handleApplicationArchiveFilterChange = (filter: 'Active' | 'Archived') => {
-    setApplicationArchiveFilter(filter);
-    setApplicationDisplayLimit(10);
-    setActionMessage(null);
-    void loadApplications(filter === 'Archived');
-  };
-
-  const handleApplicationArchiveChange = async (app: StudentApplication) => {
-    if (!isAdminOrHigher) return;
-    const isArchived = Boolean(app.archived_at);
-    const action = isArchived ? 'unarchive' : 'archive';
-    const actionLabel = isArchived ? 'Unarchive' : 'Archive';
-    if (!window.confirm(`${actionLabel} ${app.student_name}'s application?`)) return;
-
-    setActionMessage(null);
-    setLoading(true);
-    try {
-      await requestJson(`/api/admin/applications/${encodeURIComponent(app.id)}/${isArchived ? 'restore' : 'archive'}`, {
-        method: 'POST',
-        headers: getAuthHeaders(),
-      });
-      if (!await loadApplications()) {
-        setActionMessage({
-          type: 'error',
-          text: `Application ${isArchived ? 'unarchived' : 'archived'}, but the list could not be refreshed.`,
-        });
-        return;
-      }
-      setActionMessage({
-        type: 'success',
-        text: `Application ${isArchived ? 'unarchived' : 'archived'} successfully.`,
-      });
-    } catch (error) {
-      setActionMessage({
-        type: 'error',
-        text: error instanceof Error ? error.message : `Unable to ${action} application.`,
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const handleApplicationDelete = async () => {
     const app = deleteApplicationCandidate;
     if (!app || !isAdminOrHigher || deleteConfirmation !== 'DELETE' || deletingApplicationId) return;
@@ -1179,7 +895,7 @@ const resetOfficialDocumentSettings = () => {
       });
       setDeleteApplicationCandidate(null);
       setDeleteConfirmation('');
-      const listRefreshed = await loadApplications(applicationArchiveFilter === 'Archived');
+      const listRefreshed = await loadApplications();
       if (!listRefreshed) {
         setActionMessage({
           type: 'warning',
@@ -1187,7 +903,7 @@ const resetOfficialDocumentSettings = () => {
         });
         return;
       }
-      setActionMessage({ type: 'success', text: 'Student application erased; financial and payment history was preserved in the Payments register.' });
+      setActionMessage({ type: 'success', text: 'Student application erased; financial and payment history was preserved independently.' });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to delete the student application.';
       setApplicationErasureStatus({
@@ -1789,7 +1505,6 @@ const res = await fetchAdmin(url, {
   const navItems = [
     { id: 'dashboard', label: 'Dashboard Overview', icon: LayoutDashboard, minRole: 'staff' },
     { id: 'applications', label: 'Student Applications', icon: Users, minRole: 'staff' },
-    { id: 'payments', label: 'Payments', icon: Receipt, minRole: 'admin' },
     { id: 'demo-class-requests', label: 'Demo Class Requests', icon: GraduationCap, minRole: 'staff' },
     { id: 'callbacks', label: 'Callback Requests', icon: PhoneCall, minRole: 'staff' },
     { id: 'programs', label: 'Programs Management', icon: BookOpen, minRole: 'admin' },
@@ -1816,8 +1531,7 @@ const res = await fetchAdmin(url, {
   };
 
   // Filtered applications
-  const currentApplications = applicationArchiveFilter === 'Archived' ? archivedApplications : applications;
-  const filteredApplications = currentApplications
+  const filteredApplications = applications
     .filter((app) => {
       const matchesSearch =
         app.student_name.toLowerCase().includes(appSearch.toLowerCase()) ||
@@ -1836,19 +1550,6 @@ const res = await fetchAdmin(url, {
     const matchesSearch = [callback.full_name, callback.mobile, callback.email || '', callback.program_name, callback.message || '']
       .some((value) => value.toLowerCase().includes(query));
     return matchesSearch && (callbackFilterStatus === 'All' || callback.status === callbackFilterStatus);
-  });
-
-  const filteredPayments = registeredPayments.filter((payment) => {
-    const query = paymentsSearch.trim().toLocaleLowerCase();
-    return !query || [
-      payment.student_name || '',
-      payment.application_reference || '',
-      payment.student_id || '',
-      payment.program_name || '',
-      payment.reference_number || '',
-      payment.payment_method,
-      payment.payment_stage,
-    ].some((value) => value.toLocaleLowerCase().includes(query));
   });
 
   const applicationTrend = Array.from({ length: 6 }, (_, index) => {
@@ -2486,28 +2187,6 @@ const res = await fetchAdmin(url, {
                 </div>
               </div>
 
-              <div role="group" aria-label="Application archive filter" className="flex flex-wrap gap-2">
-                {([
-                  ['Active', 'Active Applications'],
-                  ['Archived', 'Archived Applications'],
-                ] as const).map(([filter, label]) => (
-                  <button
-                    key={filter}
-                    type="button"
-                    aria-pressed={applicationArchiveFilter === filter}
-                    onClick={() => handleApplicationArchiveFilterChange(filter)}
-                    disabled={applicationsLoading}
-                    className={`rounded-lg px-3 py-2 text-xs font-semibold transition-colors disabled:opacity-60 ${
-                      applicationArchiveFilter === filter
-                        ? 'bg-[#0B1F4D] text-white'
-                        : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-
               <section
                 aria-label="Accepted application total"
                 className="flex max-w-sm items-center justify-between gap-4 rounded-2xl border border-emerald-200 bg-gradient-to-r from-emerald-50 to-white p-4 shadow-sm"
@@ -2623,15 +2302,6 @@ const res = await fetchAdmin(url, {
                           >
                             Review
                           </button>
-                          <button
-                            type="button"
-                            disabled={loading || paymentLoading || app.status !== 'Accepted'}
-                            onClick={() => void loadApplicationPaymentData(app)}
-                            className="min-h-10 rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
-                            title={app.status !== 'Accepted' ? 'Approve this application first' : 'Open payment and receipt management'}
-                          >
-                            Payment &amp; receipts
-                          </button>
                           {app.status === 'Pending' && (
                             <button
                               type="button"
@@ -2641,20 +2311,6 @@ const res = await fetchAdmin(url, {
                               title="Open review and complete joining information before approval"
                             >
                               Review &amp; Approve
-                            </button>
-                          )}
-                          {isAdminOrHigher && (
-                            <button
-                              type="button"
-                              disabled={loading}
-                              onClick={() => void handleApplicationArchiveChange(app)}
-                              className={`col-span-2 inline-flex min-h-10 items-center justify-center rounded-lg border px-3 py-2 text-xs font-semibold transition-colors disabled:opacity-50 ${
-                                app.archived_at
-                                  ? 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100'
-                                  : 'border-slate-300 bg-slate-50 text-slate-700 hover:bg-slate-100'
-                              }`}
-                            >
-                              {app.archived_at ? 'Unarchive' : 'Archive'}
                             </button>
                           )}
                           {isAdminOrHigher && (
@@ -2693,109 +2349,6 @@ const res = await fetchAdmin(url, {
                 </div>
               )}
             </div>
-          )}
-
-          {activeTab === 'payments' && isAdminOrHigher && (
-            <section className="mx-auto max-w-[1600px] space-y-5">
-              <header className="flex flex-col gap-4 rounded-2xl bg-gradient-to-br from-[#0B1F4D] via-[#123365] to-[#1B4778] p-5 text-white shadow-lg sm:flex-row sm:items-center sm:justify-between sm:p-7">
-                <div>
-                  <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-orange-200">Independent financial register</p>
-                  <h1 className="mt-1 text-xl font-extrabold sm:text-2xl">Payments</h1>
-                  <p className="mt-1 max-w-2xl text-xs leading-relaxed text-blue-100 sm:text-sm">
-                    Search payment records, manage receipts, and retain payment history independently of student applications.
-                  </p>
-                </div>
-                <button type="button" onClick={() => void loadPayments()} disabled={paymentsLoading} className="inline-flex min-h-11 items-center justify-center gap-2 self-start rounded-xl border border-white/20 bg-white/10 px-4 py-2.5 text-xs font-bold text-white transition-colors hover:bg-white/20 disabled:opacity-60 sm:self-auto">
-                  <RefreshCw className={`h-4 w-4 ${paymentsLoading ? 'animate-spin' : ''}`} aria-hidden="true" />
-                  Refresh Payments
-                </button>
-              </header>
-
-              {paymentError && <p role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">{paymentError}</p>}
-              {paymentsError && <p role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">{paymentsError}</p>}
-
-              {editingPaymentId && !paymentApp && (
-                <form onSubmit={(event) => { event.preventDefault(); void savePaymentEntry(); }} className="grid gap-3 rounded-2xl border border-blue-100 bg-white p-4 shadow-sm sm:grid-cols-2 lg:grid-cols-5">
-                  <label className="text-xs font-semibold text-slate-700">Amount (INR)
-                    <input type="number" min="0.01" step="0.01" value={paymentAmountInput} onChange={(event) => setPaymentAmountInput(event.target.value)} className="mt-1 min-h-10 w-full rounded-lg border border-slate-200 px-3" />
-                  </label>
-                  <label className="text-xs font-semibold text-slate-700">Payment method
-                    <select value={paymentMethodInput} onChange={(event) => setPaymentMethodInput(event.target.value as PaymentMethod)} className="mt-1 min-h-10 w-full rounded-lg border border-slate-200 px-3">
-                      {(['cash', 'upi', 'bank_transfer', 'card', 'cheque', 'other'] as PaymentMethod[]).map((method) => <option key={method} value={method}>{method.replaceAll('_', ' ')}</option>)}
-                    </select>
-                  </label>
-                  <label className="text-xs font-semibold text-slate-700">Payment stage
-                    <select value={paymentStageInput} onChange={(event) => setPaymentStageInput(event.target.value as PaymentStage)} className="mt-1 min-h-10 w-full rounded-lg border border-slate-200 px-3">
-                      {(['first_payment', 'second_payment', 'installment', 'final_payment'] as PaymentStage[]).map((stage) => <option key={stage} value={stage}>{stage.replaceAll('_', ' ')}</option>)}
-                    </select>
-                  </label>
-                  <label className="text-xs font-semibold text-slate-700">Reference
-                    <input value={paymentReferenceInput} onChange={(event) => setPaymentReferenceInput(event.target.value)} maxLength={200} className="mt-1 min-h-10 w-full rounded-lg border border-slate-200 px-3" />
-                  </label>
-                  <label className="text-xs font-semibold text-slate-700">Notes
-                    <input value={paymentNotesInput} onChange={(event) => setPaymentNotesInput(event.target.value)} maxLength={2000} className="mt-1 min-h-10 w-full rounded-lg border border-slate-200 px-3" />
-                  </label>
-                  <div className="flex gap-2 sm:col-span-2 lg:col-span-5">
-                    <button type="submit" disabled={paymentSaving} className="min-h-10 rounded-lg bg-emerald-700 px-4 text-xs font-bold text-white disabled:opacity-50">{paymentSaving ? 'Saving…' : 'Save payment'}</button>
-                    <button type="button" disabled={paymentSaving} onClick={resetPaymentForm} className="min-h-10 rounded-lg border border-slate-300 px-4 text-xs font-bold text-slate-700">Cancel</button>
-                  </div>
-                </form>
-              )}
-
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <p className="text-sm font-bold text-slate-800">{registeredPayments.length} payment records · INR {registeredPayments.reduce((sum, item) => sum + Number(item.amount), 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })} recorded</p>
-                <form onSubmit={(event) => { event.preventDefault(); void loadPayments(); }} className="flex w-full gap-2 sm:max-w-lg">
-                  <label className="relative block min-w-0 flex-1">
-                    <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" aria-hidden="true" />
-                    <input value={paymentsSearch} onChange={(event) => setPaymentsSearch(event.target.value)} placeholder="Search student, reference, course…" className="min-h-10 w-full rounded-lg border border-slate-200 bg-white pl-9 pr-3 text-sm" />
-                  </label>
-                  <button type="submit" disabled={paymentsLoading} className="min-h-10 rounded-lg bg-[#0B1F4D] px-4 text-xs font-bold text-white disabled:opacity-50">Search</button>
-                </form>
-              </div>
-              {paymentsTruncated && <p role="status" className="rounded-lg bg-amber-50 p-3 text-xs text-amber-900">Showing the first 1,000 matches. Refine your search to locate older payment records.</p>}
-
-              {paymentsLoading && <p className="rounded-xl bg-white p-6 text-center text-sm text-slate-500">Loading payment register…</p>}
-              {!paymentsLoading && !paymentsError && (
-                <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
-                  <table className="min-w-[900px] w-full text-left text-xs">
-                    <thead className="bg-slate-50 text-[10px] uppercase tracking-wider text-slate-500">
-                      <tr><th className="px-4 py-3">Student / reference</th><th className="px-4 py-3">Course</th><th className="px-4 py-3">Payment</th><th className="px-4 py-3">Recorded</th><th className="px-4 py-3">Application link</th><th className="px-4 py-3">Actions</th></tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {filteredPayments.map((payment) => (
-                        <tr key={payment.id} className="align-top">
-                          <td className="px-4 py-3">
-                            <p className="font-bold text-slate-900">{payment.student_name || 'Student name unavailable'}</p>
-                            <p className="mt-1 font-mono text-[10px] text-slate-500">{payment.application_reference || 'Reference unavailable'}</p>
-                            {payment.student_id && <p className="mt-1 text-[10px] text-slate-500">{payment.student_id}</p>}
-                          </td>
-                          <td className="px-4 py-3 text-slate-700">{payment.program_name || 'Course unavailable'}</td>
-                          <td className="px-4 py-3">
-                            <p className="font-bold text-slate-900">INR {Number(payment.amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
-                            <p className="mt-1 capitalize text-slate-500">{payment.payment_method.replaceAll('_', ' ')} · {payment.payment_stage.replaceAll('_', ' ')}</p>
-                            {payment.reference_number && <p className="mt-1 break-all text-slate-500">Ref: {payment.reference_number}</p>}
-                          </td>
-                          <td className="px-4 py-3 text-slate-600">{new Date(payment.recorded_at).toLocaleDateString('en-IN')}</td>
-                          <td className="px-4 py-3">
-                            <span className={`rounded-full px-2 py-1 text-[10px] font-bold ${payment.application_id ? 'bg-blue-50 text-blue-700' : 'bg-emerald-50 text-emerald-700'}`}>
-                              {payment.application_id ? 'Linked' : 'Preserved independently'}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3">
-                            <div className="flex flex-wrap gap-2">
-                              <button type="button" disabled={receiptBusyId === payment.id} onClick={() => void generatePaymentReceipt(payment.id)} className="rounded-md border border-emerald-200 px-2 py-1.5 font-bold text-emerald-800 disabled:opacity-50">{receiptBusyId === payment.id ? 'Working…' : 'Receipt'}</button>
-                              {isAdminOrHigher && <button type="button" disabled={paymentSaving} onClick={() => { setPaymentApp(null); beginEditPayment(payment); }} className="rounded-md border border-blue-200 px-2 py-1.5 font-bold text-blue-800 disabled:opacity-50">Edit</button>}
-                              {isAdminOrHigher && <button type="button" disabled={paymentSaving} onClick={() => void removePaymentEntry(payment)} className="rounded-md border border-rose-200 px-2 py-1.5 font-bold text-rose-700 disabled:opacity-50">Delete</button>}
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                      {!filteredPayments.length && <tr><td colSpan={6} className="px-4 py-10 text-center text-slate-500">No matching payment records.</td></tr>}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </section>
           )}
 
           {activeTab === 'demo-class-requests' && (
@@ -4508,292 +4061,6 @@ const res = await fetchAdmin(url, {
         </div>
       )}
 
-      {/* Manual Payment Register Modal — independent of application approval */}
-      {paymentApp && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs">
-          <section
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="payment-register-title"
-            className="bg-white rounded-3xl max-w-4xl w-full p-6 sm:p-8 space-y-6 shadow-2xl border border-slate-200 max-h-[90vh] overflow-y-auto"
-          >
-            <div className="flex items-start justify-between gap-4 border-b border-slate-100 pb-4">
-              <div>
-                <span className="text-[11px] font-bold uppercase tracking-wider text-blue-700">
-                  Manual Payment Register
-                </span>
-                <h2 id="payment-register-title" className="text-xl font-extrabold text-slate-900">
-                  {paymentApp.student_name}
-                </h2>
-                <p className="text-xs text-slate-500 mt-1">
-                  {paymentApp.application_reference} · {paymentApp.program_name || 'Course not specified'}
-                </p>
-                <p className="text-xs text-slate-500 mt-1">
-                  Payment records do not change application approval status.
-                </p>
-              </div>
-              <button
-                type="button"
-                aria-label="Close payment register"
-                onClick={() => {
-                  setPaymentApp(null);
-                  setPaymentData(null);
-                  setPaymentError(null);
-                  setEditingPaymentId(null);
-                }}
-                className="p-2 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {paymentLoading && (
-              <p role="status" className="text-sm text-slate-600 py-6">
-                Loading payment records…
-              </p>
-            )}
-
-            {paymentError && (
-              <div role="alert" className="rounded-xl bg-rose-50 border border-rose-200 p-4 text-sm text-rose-800">
-                {paymentError}
-                <button
-                  type="button"
-                  onClick={() => void loadApplicationPaymentData(paymentApp)}
-                  className="ml-3 font-bold underline"
-                >
-                  Retry
-                </button>
-              </div>
-            )}
-
-            {!paymentLoading && paymentData && (
-              <>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div className="rounded-2xl bg-emerald-50 border border-emerald-100 p-4">
-                    <p className="text-xs text-emerald-700">Total paid</p>
-                    <p className="text-xl font-extrabold text-emerald-800 mt-1">
-                      ₹{Number(paymentData.totalPaid).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </p>
-                  </div>
-                </div>
-
-                {isAdminOrHigher && (
-                  <div className="rounded-2xl border border-blue-200 bg-blue-50/50 p-4 space-y-3">
-                    <h3 className="font-bold text-slate-900">
-                      {editingPaymentId ? 'Edit payment' : 'Record payment'}
-                    </h3>
-                    <label className="block text-xs font-semibold text-slate-600">
-                      Amount (INR)
-                      <input
-                        type="number"
-                        min="0.01"
-                        step="0.01"
-                        value={paymentAmountInput}
-                        onChange={(event) => setPaymentAmountInput(event.target.value)}
-                        disabled={paymentSaving}
-                        placeholder="Amount received"
-                        className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
-                      />
-                    </label>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <label className="block text-xs font-semibold text-slate-600">
-                        Payment method
-                        <select
-                          value={paymentMethodInput}
-                          onChange={(event) => setPaymentMethodInput(event.target.value as PaymentMethod)}
-                          disabled={paymentSaving}
-                          className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
-                        >
-                          <option value="cash">Cash</option>
-                          <option value="upi">UPI</option>
-                          <option value="bank_transfer">Bank transfer</option>
-                          <option value="card">Card</option>
-                          <option value="cheque">Cheque</option>
-                          <option value="other">Other</option>
-                        </select>
-                      </label>
-                      <label className="block text-xs font-semibold text-slate-600">
-                        Payment stage
-                        <select
-                          value={paymentStageInput}
-                          onChange={(event) => setPaymentStageInput(event.target.value as PaymentStage)}
-                          disabled={paymentSaving}
-                          className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
-                        >
-                          <option value="first_payment">First payment</option>
-                          <option value="second_payment">Second payment</option>
-                          <option value="installment">Installment</option>
-                          <option value="final_payment">Final payment</option>
-                        </select>
-                      </label>
-                    </div>
-                    <label className="block text-xs font-semibold text-slate-600">
-                      Reference number (optional)
-                      <input
-                        type="text"
-                        maxLength={200}
-                        value={paymentReferenceInput}
-                        onChange={(event) => setPaymentReferenceInput(event.target.value)}
-                        disabled={paymentSaving}
-                        placeholder="Transaction ID or receipt number"
-                        className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
-                      />
-                    </label>
-                    <label className="block text-xs font-semibold text-slate-600">
-                      Notes (optional)
-                      <textarea
-                        rows={2}
-                        maxLength={2000}
-                        value={paymentNotesInput}
-                        onChange={(event) => setPaymentNotesInput(event.target.value)}
-                        disabled={paymentSaving}
-                        placeholder="Additional payment details"
-                        className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
-                      />
-                    </label>
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        disabled={paymentSaving || paymentLoading || !paymentAmountInput.trim()}
-                        onClick={() => void savePaymentEntry()}
-                        className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm disabled:opacity-50"
-                      >
-                        {paymentSaving ? 'Saving…' : editingPaymentId ? 'Save changes' : 'Record payment'}
-                      </button>
-                      {editingPaymentId && (
-                        <button
-                          type="button"
-                          disabled={paymentSaving}
-                          onClick={resetPaymentForm}
-                          className="px-4 py-2 rounded-xl border border-slate-300 bg-white text-slate-700 font-bold text-sm disabled:opacity-50"
-                        >
-                          Cancel edit
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <h3 className="font-bold text-slate-900">Payment history</h3>
-                    <span className="text-xs text-slate-500">
-                      {paymentData.payments.length} record{paymentData.payments.length === 1 ? '' : 's'}
-                    </span>
-                  </div>
-
-                  {paymentData.payments.length === 0 ? (
-                    <div className="rounded-xl border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500">
-                      No payments recorded for this application yet.
-                    </div>
-                  ) : (
-                    <div className="overflow-x-auto rounded-xl border border-slate-200">
-                      <table className="w-full text-left text-xs">
-                        <thead className="bg-slate-50 text-slate-600">
-                          <tr>
-                            <th className="px-3 py-3 font-bold">Recorded</th>
-                            <th className="px-3 py-3 font-bold">Stage</th>
-                            <th className="px-3 py-3 font-bold">Method</th>
-                            <th className="px-3 py-3 font-bold text-right">Amount</th>
-                            <th className="px-3 py-3 font-bold">Reference / notes</th>
-                            <th className="px-3 py-3 font-bold">Recorded by</th>
-                            <th className="px-3 py-3 font-bold">Actions</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                          {paymentData.payments.map((payment) => (
-                            <tr key={payment.id} className="align-top">
-                              <td className="px-3 py-3 whitespace-nowrap text-slate-600">
-                                {new Date(payment.recorded_at).toLocaleString('en-IN')}
-                              </td>
-                              <td className="px-3 py-3 text-slate-700">
-                                {payment.payment_stage === 'first_fee'
-                                  ? 'first payment'
-                                  : payment.payment_stage === 'second_fee'
-                                    ? 'second payment'
-                                    : payment.payment_stage.replaceAll('_', ' ')}
-                              </td>
-                              <td className="px-3 py-3 text-slate-700">
-                                {payment.payment_method.replaceAll('_', ' ')}
-                              </td>
-                              <td className="px-3 py-3 text-right font-bold text-slate-900 whitespace-nowrap">
-                                ₹{Number(payment.amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                              </td>
-                              <td className="px-3 py-3 text-slate-600 min-w-36">
-                                {payment.reference_number || '—'}
-                                {payment.notes && <p className="mt-1 whitespace-pre-wrap">{payment.notes}</p>}
-                              </td>
-                              <td className="px-3 py-3 text-slate-600">
-                                {payment.recorded_by_name || payment.recorded_by || '—'}
-                              </td>
-                              <td className="px-3 py-3">
-                                <div className="flex flex-wrap gap-2">
-                                  <button
-                                    type="button"
-                                    disabled={receiptBusyId === payment.id || paymentSaving || paymentLoading}
-                                    onClick={() => void generatePaymentReceipt(payment.id)}
-                                    className="rounded-lg border border-emerald-200 px-2.5 py-1.5 font-semibold text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"
-                                  >
-                                    {receiptBusyId === payment.id ? 'Working…' : 'Download receipt'}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    disabled={receiptBusyId === payment.id || paymentSaving || paymentLoading}
-                                    onClick={() => void generatePaymentReceipt(payment.id, true)}
-                                    className="rounded-lg border border-blue-200 px-2.5 py-1.5 font-semibold text-blue-700 hover:bg-blue-50 disabled:opacity-50"
-                                  >
-                                    Send receipt email
-                                  </button>
-                                  {isAdminOrHigher && (
-                                    <>
-                                      <button
-                                        type="button"
-                                        disabled={paymentSaving || paymentLoading}
-                                        onClick={() => beginEditPayment(payment)}
-                                        className="rounded-lg border border-slate-300 px-2.5 py-1.5 font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-                                      >
-                                        Edit
-                                      </button>
-                                      <button
-                                        type="button"
-                                        disabled={paymentSaving || paymentLoading}
-                                        onClick={() => void removePaymentEntry(payment)}
-                                        className="rounded-lg border border-red-200 px-2.5 py-1.5 font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50"
-                                      >
-                                        Delete
-                                      </button>
-                                    </>
-                                  )}
-                                </div>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </div>
-              </>
-            )}
-
-            <div className="flex justify-end border-t border-slate-100 pt-4">
-              <button
-                type="button"
-                onClick={() => {
-                  setPaymentApp(null);
-                  setPaymentData(null);
-                  setPaymentError(null);
-                  setEditingPaymentId(null);
-                }}
-                className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-sm"
-              >
-                Close
-              </button>
-            </div>
-          </section>
-        </div>
-      )}
-
       {/* Passport Photo Preview Modal */}
       {appPhotoModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs">
@@ -4830,7 +4097,7 @@ const res = await fetchAdmin(url, {
                 Permanently delete application?
               </h2>
               <p id="delete-application-warning" className="mt-2 text-sm leading-6 text-slate-700">
-                This action cannot be undone. It deletes the application and verified application photo/admission documents. Payment transactions, receipts, payment audits, historical baselines, fee agreements, and payment-update history are detached and preserved in the Payments register. Erasure remains blocked until the academy records its legal and retention approval.
+                This action cannot be undone. It deletes the application and verified application photo/admission documents. Payment transactions, receipts, payment audits, historical baselines, fee agreements, and payment-update history are detached and preserved independently. Erasure remains blocked until the academy records its legal and retention approval.
               </p>
             </div>
             <dl className="grid gap-3 rounded-xl bg-slate-50 p-4 text-sm">
