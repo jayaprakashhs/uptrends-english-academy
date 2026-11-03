@@ -97,8 +97,7 @@ export const Home: React.FC<HomeProps> = ({
   branding,
 }) => {
   const publishedPrograms = programs
-    .filter((program) => program.is_published)
-    .slice(0, 4);
+    .filter((program) => program.is_published);
   const programCarouselRef = React.useRef<HTMLDivElement | null>(null);
   const [activeProgramIndex, setActiveProgramIndex] = React.useState(0);
   const [heroPhotoSource, setHeroPhotoSource] = React.useState<string | null>(
@@ -379,7 +378,9 @@ export const Home: React.FC<HomeProps> = ({
                     data-program-slide
                     aria-roledescription="slide"
                     aria-label={`${index + 1} of ${publishedPrograms.length}: ${program.title}`}
-                    className="group flex min-w-0 flex-[0_0_100%] shrink-0 snap-start flex-col overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm transition-all duration-300 hover:shadow-xl sm:flex-auto"
+                    className={`group flex min-w-0 flex-[0_0_100%] shrink-0 snap-start flex-col overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm transition-all duration-300 hover:shadow-xl sm:flex-auto ${
+                      index >= 4 ? 'sm:hidden' : ''
+                    }`}
                   >
                     <div className="relative aspect-[16/10] overflow-hidden bg-slate-100">
                       <img
