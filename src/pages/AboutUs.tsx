@@ -123,15 +123,14 @@ export const AboutUs: React.FC<AboutUsProps> = ({
       </section>
 
       {/* 2. Meet Our Team (Admin managed, no invented staff) */}
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="text-center max-w-2xl mx-auto mb-10">
-          <span className="text-xs font-bold uppercase tracking-wider text-emerald-600">
-            Academic Mentors
-          </span>
-          <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-950 mt-1">
-            Meet Our Instructors
+      <section className="relative isolate mx-auto max-w-7xl overflow-hidden rounded-3xl bg-[#f3f8fc] px-4 py-10 sm:px-6 sm:py-12 lg:px-8">
+        <span aria-hidden="true" className="pointer-events-none absolute -left-12 top-24 h-40 w-40 rounded-full bg-sky-100/80" />
+        <span aria-hidden="true" className="pointer-events-none absolute -right-10 bottom-8 h-52 w-52 rounded-full bg-orange-50/90" />
+        <div className="relative z-10 mb-12">
+          <h2 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-950">
+            Meet Our <span className="text-orange-600">Instructors</span>
           </h2>
-          <p className="text-xs text-slate-600 mt-1">
+          <p className="mt-2 max-w-2xl text-sm text-slate-600">
             Experienced mentors dedicated to student progress and spoken English excellence.
           </p>
         </div>
@@ -145,27 +144,34 @@ export const AboutUs: React.FC<AboutUsProps> = ({
             {instructorAssetWarning && (
               <p role="status" className="mb-4 text-center text-xs text-amber-700">{instructorAssetWarning}</p>
             )}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="relative z-10 grid grid-cols-1 items-stretch gap-x-8 gap-y-16 pt-12 sm:grid-cols-2 lg:grid-cols-3">
               {publishedTeam.map((member) => (
-                <div key={member.id} className="bg-white rounded-2xl border border-slate-200 p-6 text-center shadow-xs">
+                <article
+                  key={member.id}
+                  className="relative flex min-h-[25rem] w-full flex-col items-center rounded-2xl border border-slate-100 bg-white px-6 pb-9 pt-16 text-center shadow-[0_12px_35px_rgba(15,35,65,0.08)]"
+                >
                   {member.photo_url ? (
                     <img
                       src={member.photo_url}
                       alt={member.full_name}
-                      className="w-24 h-24 rounded-full mx-auto object-cover mb-4 border-2 border-orange-500"
+                      className="absolute left-1/2 top-0 h-24 w-24 -translate-x-1/2 -translate-y-1/2 rounded-full border-4 border-orange-500 bg-white object-cover shadow-md"
                     />
                   ) : (
-                    <div className="w-24 h-24 rounded-full bg-orange-100 text-orange-600 font-bold text-2xl flex items-center justify-center mx-auto mb-4 border-2 border-orange-300">
+                    <div
+                      aria-hidden="true"
+                      className="absolute left-1/2 top-0 flex h-24 w-24 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-4 border-orange-500 bg-orange-100 text-2xl font-bold text-orange-700 shadow-md"
+                    >
                       {member.full_name.charAt(0)}
                     </div>
                   )}
-                  <h3 className="font-bold text-slate-900 text-lg">{member.full_name}</h3>
-                  <p className="text-xs text-orange-600 font-semibold mb-3">{member.designation}</p>
+                  <h3 className="break-words text-xl font-bold leading-snug text-[#0B1F4D]">{member.full_name}</h3>
+                  <p className="mt-1 break-words text-sm font-semibold leading-snug text-orange-600">{member.designation}</p>
+                  <span aria-hidden="true" className="my-4 h-px w-14 bg-orange-400" />
                   {member.qualifications && (
-                    <p className="text-xs text-slate-500 mb-2">{member.qualifications}</p>
+                    <p className="text-sm italic leading-relaxed text-slate-500">{member.qualifications}</p>
                   )}
-                  <p className="text-xs text-slate-600 leading-relaxed">{member.bio}</p>
-                </div>
+                  <p className="mt-5 w-full whitespace-pre-wrap break-words text-center text-sm leading-7 text-slate-500">{member.bio}</p>
+                </article>
               ))}
             </div>
           </>

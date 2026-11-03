@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { CheckCircle, ImagePlus, LoaderCircle, Pencil, Plus, Trash2, Upload, X } from 'lucide-react';
+import { CheckCircle, Eye, ImagePlus, LoaderCircle, Pencil, RotateCcw, Trash2, Upload, UserRound, UsersRound } from 'lucide-react';
 import type { AdminProfile, TeamMember } from '../types';
 import { extractYouTubeId, getYouTubeThumbnail } from '../lib/youtube';
 import { supabase } from '../lib/supabase';
@@ -550,24 +550,29 @@ export const AboutUsManagement: React.FC<{ currentAdmin: AdminProfile }> = ({ cu
         </p>
       )}
 
-      <div className="grid items-start gap-6 xl:grid-cols-2">
-        <section className="space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <h2 className="text-lg font-bold text-slate-900">Instructor Profiles</h2>
-              <p className="text-xs text-slate-500">Only published profiles appear on the public About Us page.</p>
+      <div className="space-y-6">
+        <section className="overflow-hidden rounded-2xl border border-sky-100 bg-white shadow-sm">
+          <div className="px-5 pb-5 pt-6 sm:px-7">
+            <div className="flex items-center gap-4">
+              <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-orange-50 text-orange-600">
+                <UsersRound className="h-7 w-7" />
+              </span>
+              <div>
+                <h2 className="text-2xl font-bold tracking-tight text-[#0B1F4D] sm:text-3xl">
+                  {instructorDraft.id ? 'Edit Instructor' : 'Add Instructor'}
+                </h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  {instructorDraft.id
+                    ? 'Update this instructor profile for the About Us section'
+                    : 'Create a new instructor profile for the About Us section'}
+                </p>
+              </div>
             </div>
-            <button
-              type="button"
-              onClick={resetInstructorEditor}
-              className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-orange-600 px-3 py-2 text-xs font-bold text-white hover:bg-orange-700"
-            >
-              <Plus className="h-4 w-4" /> Add
-            </button>
+            <div className="mt-5 h-px bg-orange-500" />
           </div>
 
           {instructorMessage && (
-            <p role={instructorMessage.type === 'error' ? 'alert' : 'status'} className={`rounded-lg p-3 text-xs ${
+            <p role={instructorMessage.type === 'error' ? 'alert' : 'status'} className={`mx-5 mb-4 rounded-lg p-3 text-xs sm:mx-7 ${
               instructorMessage.type === 'success' ? 'bg-emerald-50 text-emerald-800' :
                 instructorMessage.type === 'warning' ? 'bg-amber-50 text-amber-800' : 'bg-rose-50 text-rose-800'
             }`}>
@@ -575,93 +580,177 @@ export const AboutUsManagement: React.FC<{ currentAdmin: AdminProfile }> = ({ cu
             </p>
           )}
 
-          <form onSubmit={saveInstructor} className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
-            <h3 className="font-bold text-slate-900">{instructorDraft.id ? 'Edit instructor' : 'Add instructor'}</h3>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <label className="space-y-1 text-xs font-semibold text-slate-700">
-                Instructor name
-                <input required value={instructorDraft.full_name} onChange={(event) => setInstructorDraft({ ...instructorDraft, full_name: event.target.value })} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" />
-              </label>
-              <label className="space-y-1 text-xs font-semibold text-slate-700">
-                Designation
-                <input required value={instructorDraft.designation} onChange={(event) => setInstructorDraft({ ...instructorDraft, designation: event.target.value })} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" />
-              </label>
-            </div>
-            <label className="block space-y-1 text-xs font-semibold text-slate-700">
-              Qualifications
-              <input value={instructorDraft.qualifications} onChange={(event) => setInstructorDraft({ ...instructorDraft, qualifications: event.target.value })} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" />
-            </label>
-            <label className="block space-y-1 text-xs font-semibold text-slate-700">
-              Biography
-              <textarea required rows={3} value={instructorDraft.bio} onChange={(event) => setInstructorDraft({ ...instructorDraft, bio: event.target.value })} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" />
-            </label>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <label className="space-y-1 text-xs font-semibold text-slate-700">
-                Display order
-                <input type="number" step="1" value={instructorDraft.display_order} onChange={(event) => setInstructorDraft({ ...instructorDraft, display_order: Number(event.target.value) })} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" />
-              </label>
-              <label className="flex items-center gap-2 self-end pb-2 text-xs font-semibold text-slate-700">
-                <input type="checkbox" checked={instructorDraft.is_published} onChange={(event) => setInstructorDraft({ ...instructorDraft, is_published: event.target.checked })} className="accent-emerald-600" />
-                Published on the public page
-              </label>
-            </div>
-            <div className="flex flex-wrap items-center gap-3">
-              <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700">
-                <ImagePlus className="h-4 w-4" />
-                {selectedPhoto ? 'Replace selected photo' : 'Upload / replace photo'}
-                <input
-                  type="file"
-                  accept="image/jpeg,image/png,image/webp"
-                  className="sr-only"
-                  onChange={(event) => {
-                    const file = event.target.files?.[0] || null;
-                    event.target.value = '';
-                    setSelectedPhoto(file);
-                    setRemovePhoto(false);
-                  }}
-                />
-              </label>
-              {(instructorDraft.photo_object_key || selectedPhoto) && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (removePhoto) {
-                      setRemovePhoto(false);
-                    } else {
-                      setSelectedPhoto(null);
-                      setRemovePhoto(true);
-                    }
-                  }}
-                  className="text-xs font-semibold text-rose-700 hover:underline"
-                >
-                  {removePhoto ? 'Keep current photo' : 'Remove photo'}
-                </button>
-              )}
-              {(photoPreview || (!removePhoto && instructorDraft.photo_display_url)) && (
-                <img
-                  src={photoPreview || instructorDraft.photo_display_url || ''}
-                  alt="Instructor photo preview"
-                  className="h-12 w-12 rounded-full border border-slate-300 object-cover"
-                />
-              )}
-            </div>
-            <div className="flex flex-wrap gap-2 pt-1">
-              <button type="submit" disabled={savingInstructor} className="inline-flex items-center gap-2 rounded-lg bg-orange-600 px-4 py-2 text-xs font-bold text-white disabled:opacity-60">
-                {savingInstructor ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
-                {instructorDraft.id ? 'Save instructor' : 'Add instructor'}
-              </button>
-              {instructorDraft.id && (
-                <button type="button" onClick={resetInstructorEditor} className="inline-flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700">
-                  <X className="h-4 w-4" /> Cancel
-                </button>
-              )}
-            </div>
-          </form>
+          <div className="grid items-stretch gap-5 px-5 pb-6 sm:px-7 lg:grid-cols-[minmax(0,1.62fr)_minmax(18rem,1fr)]">
+            <form onSubmit={saveInstructor} className="min-w-0 space-y-5 rounded-xl border border-sky-100 bg-white p-4 sm:p-6">
+              <h3 className="text-lg font-bold text-[#0B1F4D]">Instructor Details</h3>
 
-          {instructors.length === 0 && !loading && !loadError && (
-            <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-600">No instructor profiles have been added.</p>
-          )}
-          <div className="space-y-3">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="block space-y-1.5 text-sm font-semibold text-slate-700">
+                  Instructor Name
+                  <input
+                    required
+                    value={instructorDraft.full_name}
+                    onChange={(event) => setInstructorDraft({ ...instructorDraft, full_name: event.target.value })}
+                    className="w-full rounded-lg border border-sky-100 bg-white px-3.5 py-3 text-sm font-normal outline-none transition focus:border-orange-400 focus:ring-2 focus:ring-orange-100"
+                    placeholder="Enter instructor name"
+                  />
+                </label>
+                <label className="block space-y-1.5 text-sm font-semibold text-slate-700">
+                  Designation
+                  <input
+                    required
+                    value={instructorDraft.designation}
+                    onChange={(event) => setInstructorDraft({ ...instructorDraft, designation: event.target.value })}
+                    className="w-full rounded-lg border border-sky-100 bg-white px-3.5 py-3 text-sm font-normal outline-none transition focus:border-orange-400 focus:ring-2 focus:ring-orange-100"
+                    placeholder="e.g. Spoken English Trainer"
+                  />
+                </label>
+              </div>
+
+              <label className="block space-y-1.5 text-sm font-semibold text-slate-700">
+                Qualifications
+                <input
+                  value={instructorDraft.qualifications}
+                  onChange={(event) => setInstructorDraft({ ...instructorDraft, qualifications: event.target.value })}
+                  className="w-full rounded-lg border border-sky-100 bg-white px-3.5 py-3 text-sm font-normal outline-none transition focus:border-orange-400 focus:ring-2 focus:ring-orange-100"
+                  placeholder="Enter qualifications"
+                />
+              </label>
+
+              <label className="block space-y-1.5 text-sm font-semibold text-slate-700">
+                Biography
+                <textarea
+                  required
+                  rows={6}
+                  maxLength={1000}
+                  value={instructorDraft.bio}
+                  onChange={(event) => setInstructorDraft({ ...instructorDraft, bio: event.target.value })}
+                  className="w-full resize-y rounded-lg border border-sky-100 bg-white px-3.5 py-3 text-sm font-normal leading-relaxed outline-none transition focus:border-orange-400 focus:ring-2 focus:ring-orange-100"
+                  placeholder="Write a short biography about the instructor..."
+                />
+                <span className="block text-right text-xs font-normal text-slate-400">{instructorDraft.bio.length} / 1000</span>
+              </label>
+
+              <div>
+                <h4 className="mb-2 text-sm font-semibold text-slate-700">Profile Photo</h4>
+                <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(10rem,0.8fr)]">
+                  <div className="flex min-h-32 flex-col items-center justify-center rounded-lg border border-dashed border-sky-200 bg-slate-50/50 p-4 text-center">
+                    <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-sky-100 bg-white px-4 py-2.5 text-sm font-semibold text-[#0B1F4D] transition hover:border-orange-300 hover:bg-orange-50">
+                      <ImagePlus className="h-4 w-4 text-orange-600" />
+                      {selectedPhoto ? 'Change Photo' : 'Upload Photo'}
+                      <input
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp"
+                        className="sr-only"
+                        onChange={(event) => {
+                          const file = event.target.files?.[0] || null;
+                          event.target.value = '';
+                          setSelectedPhoto(file);
+                          setRemovePhoto(false);
+                        }}
+                      />
+                    </label>
+                    <p className="mt-2 text-xs text-slate-400">JPG, PNG or WebP · Max 5 MB</p>
+                    {(instructorDraft.photo_object_key || selectedPhoto) && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (removePhoto) {
+                            setRemovePhoto(false);
+                          } else {
+                            setSelectedPhoto(null);
+                            setRemovePhoto(true);
+                          }
+                        }}
+                        className="mt-2 text-xs font-semibold text-rose-700 hover:underline"
+                      >
+                        {removePhoto ? 'Keep current photo' : 'Remove photo'}
+                      </button>
+                    )}
+                  </div>
+                  <div className="rounded-lg border border-sky-100 bg-[#F8FBFF] p-4">
+                    <h5 className="text-sm font-bold text-[#0B1F4D]">Recommended Photo</h5>
+                    <p className="mt-2 text-xs leading-relaxed text-slate-500">
+                      Use a clear, professional headshot. Square images work best for the instructor profile.
+                    </p>
+                    <p className="mt-2 text-xs text-slate-400">Recommended: 400 × 400 px</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="block space-y-1.5 text-sm font-semibold text-slate-700">
+                  Display Order
+                  <input
+                    type="number"
+                    step="1"
+                    value={instructorDraft.display_order}
+                    onChange={(event) => setInstructorDraft({ ...instructorDraft, display_order: Number(event.target.value) })}
+                    className="w-full rounded-lg border border-sky-100 bg-white px-3 py-2.5 text-sm font-normal outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100"
+                  />
+                </label>
+                <label className="flex items-center gap-2 self-end pb-3 text-sm font-medium text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={instructorDraft.is_published}
+                    onChange={(event) => setInstructorDraft({ ...instructorDraft, is_published: event.target.checked })}
+                    className="h-4 w-4 accent-orange-600"
+                  />
+                  Published on the public page
+                </label>
+              </div>
+
+              <div className="flex flex-wrap gap-3 border-t border-sky-50 pt-4">
+                <button type="submit" disabled={savingInstructor} className="inline-flex min-w-40 items-center justify-center gap-2 rounded-lg bg-orange-600 px-5 py-3 text-sm font-bold text-white transition hover:bg-orange-700 disabled:opacity-60">
+                  {savingInstructor ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
+                  {instructorDraft.id ? 'Save Changes' : 'Add Instructor'}
+                </button>
+                <button type="button" onClick={resetInstructorEditor} className="inline-flex items-center justify-center gap-2 rounded-lg border border-sky-200 bg-white px-5 py-3 text-sm font-semibold text-[#0B1F4D] transition hover:bg-slate-50">
+                  <RotateCcw className="h-4 w-4" /> Reset
+                </button>
+              </div>
+            </form>
+
+            <aside className="flex min-w-0 flex-col overflow-hidden rounded-xl border border-sky-100 bg-white">
+              <div className="flex items-center gap-2 bg-[#0B1F4D] px-5 py-4 text-white">
+                <Eye className="h-5 w-5" />
+                <h3 className="text-base font-bold">Preview</h3>
+              </div>
+              <div className="relative mx-5 mb-5 mt-16 flex min-h-[28rem] flex-1 flex-col items-center rounded-xl border border-sky-100 px-5 pb-8 pt-16 text-center sm:mx-7 sm:px-8">
+                {(photoPreview || (!removePhoto && instructorDraft.photo_display_url)) ? (
+                  <img
+                    src={photoPreview || instructorDraft.photo_display_url || ''}
+                    alt={instructorDraft.full_name ? `${instructorDraft.full_name} portrait preview` : 'Instructor portrait preview'}
+                    className="absolute left-1/2 top-0 h-28 w-28 -translate-x-1/2 -translate-y-1/2 rounded-full border-4 border-white bg-white object-cover shadow-md"
+                  />
+                ) : (
+                  <div className="absolute left-1/2 top-0 flex h-28 w-28 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-4 border-white bg-slate-100 text-slate-400 shadow-md">
+                    <UserRound className="h-14 w-14" />
+                  </div>
+                )}
+                <h4 className="mt-5 break-words text-2xl font-bold leading-tight text-[#0B1F4D]">
+                  {instructorDraft.full_name.trim() || 'Instructor Name'}
+                </h4>
+                <p className="mt-2 break-words text-base font-semibold text-orange-600">
+                  {instructorDraft.designation.trim() || 'Designation'}
+                </p>
+                <div className="my-5 h-0.5 w-16 bg-orange-500" />
+                <p className="min-h-5 break-words text-sm italic text-slate-500">
+                  {instructorDraft.qualifications.trim() || 'Qualifications'}
+                </p>
+                <p className="mt-6 w-full whitespace-pre-wrap break-words text-sm leading-relaxed text-slate-600">
+                  {instructorDraft.bio.trim() || 'The instructor biography will appear here.'}
+                </p>
+              </div>
+            </aside>
+          </div>
+
+          <div className="space-y-3 border-t border-sky-50 px-5 py-5 sm:px-7">
+            <h3 className="text-base font-bold text-[#0B1F4D]">Instructor Profiles</h3>
+            <p className="text-xs text-slate-500">Only published profiles appear on the public About Us page.</p>
+            {instructors.length === 0 && !loading && !loadError && (
+              <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-600">No instructor profiles have been added.</p>
+            )}
             {instructors.map((instructor) => (
               <article key={instructor.id} className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 p-3">
                 {instructor.photo_display_url ? (
@@ -694,7 +783,7 @@ export const AboutUsManagement: React.FC<{ currentAdmin: AdminProfile }> = ({ cu
           </div>
         </section>
 
-        <section className="space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
+        <section className="space-y-4 rounded-2xl border border-sky-100 bg-white p-4 shadow-sm sm:p-6">
           <div>
             <h2 className="text-lg font-bold text-slate-900">Video Introduction</h2>
             <p className="text-xs text-slate-500">Preview the YouTube video and poster before publishing.</p>
