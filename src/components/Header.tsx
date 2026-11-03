@@ -86,7 +86,7 @@ export const Header: React.FC<HeaderProps> = ({
   return (
     <header
       onFocusCapture={() => updateHeaderVisibility(true)}
-      className={`sticky top-0 z-40 border-b border-orange-100 bg-[#fff8ef] shadow-xs backdrop-blur-md transition-transform duration-300 ease-in-out motion-reduce:transition-none ${
+      className={`relative z-40 border-b border-orange-100 bg-[#fff8ef] shadow-xs backdrop-blur-md transition-transform duration-300 ease-in-out motion-reduce:transition-none ${
         headerVisible ? 'translate-y-0' : '-translate-y-full'
       }`}
     >

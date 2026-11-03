@@ -229,23 +229,27 @@ export function App() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-50 text-slate-900 antialiased selection:bg-orange-500 selection:text-white">
-      {/* Moving Announcement Banner (Section 6.B - no close button, Supabase driven) */}
-      <AnnouncementBanner
-        onOpenApplication={() => {
-          setCurrentPage('apply');
-          window.scrollTo({ top: 0, behavior: 'smooth' });
-        }}
-        onOpenDemoClass={() => setDemoClassModalOpen(true)}
-      />
+    <div className="min-h-screen flex flex-col bg-[#fff8ef] text-slate-900 antialiased selection:bg-orange-500 selection:text-white">
+      <div className="sticky top-0 z-50">
+        {/* Moving Announcement Banner (Section 6.B - no close button, Supabase driven) */}
+        <div className="relative z-50">
+          <AnnouncementBanner
+            onOpenApplication={() => {
+              setCurrentPage('apply');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            onOpenDemoClass={() => setDemoClassModalOpen(true)}
+          />
+        </div>
 
-      {/* Main Navigation Header */}
-      <Header
-        currentPage={currentPage}
-        setCurrentPage={setCurrentPage}
-        openCallbackModal={openCallbackModal}
-        branding={branding}
-      />
+        {/* Main Navigation Header */}
+        <Header
+          currentPage={currentPage}
+          setCurrentPage={setCurrentPage}
+          openCallbackModal={openCallbackModal}
+          branding={branding}
+        />
+      </div>
 
       {Object.entries(publicStatuses).some(([, status]) => status.error) && (
         <div className="bg-amber-50 border-b border-amber-200 px-4 py-3 text-sm text-amber-900" role="status" aria-live="polite">
