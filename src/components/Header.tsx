@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Logo } from './Logo';
 import {
   Menu,
@@ -24,6 +24,49 @@ export const Header: React.FC<HeaderProps> = ({
   branding,
 }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [headerVisible, setHeaderVisible] = useState(true);
+  const headerVisibleRef = useRef(true);
+
+  const updateHeaderVisibility = (visible: boolean) => {
+    if (headerVisibleRef.current === visible) return;
+    headerVisibleRef.current = visible;
+    setHeaderVisible(visible);
+  };
+
+  useEffect(() => {
+    let previousScrollY = window.scrollY;
+    let accumulatedScroll = 0;
+    const scrollThreshold = 14;
+
+    const handleScroll = () => {
+      const currentScrollY = window.scrollY;
+      const scrollDelta = currentScrollY - previousScrollY;
+      previousScrollY = currentScrollY;
+
+      if (currentScrollY <= 8 || mobileMenuOpen) {
+        accumulatedScroll = 0;
+        updateHeaderVisibility(true);
+        return;
+      }
+
+      if (scrollDelta === 0) return;
+      if (Math.sign(scrollDelta) !== Math.sign(accumulatedScroll)) {
+        accumulatedScroll = 0;
+      }
+      accumulatedScroll += scrollDelta;
+
+      if (accumulatedScroll >= scrollThreshold) {
+        updateHeaderVisibility(false);
+        accumulatedScroll = 0;
+      } else if (accumulatedScroll <= -scrollThreshold) {
+        updateHeaderVisibility(true);
+        accumulatedScroll = 0;
+      }
+    };
+
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, [mobileMenuOpen]);
 
   const navLinks = [
     { id: 'home', label: 'Home' },
@@ -41,7 +84,12 @@ export const Header: React.FC<HeaderProps> = ({
   };
 
   return (
-    <header className="sticky top-0 z-40 border-b border-orange-100 bg-[#fff8ef]/95 shadow-xs backdrop-blur-md">
+    <header
+      onFocusCapture={() => updateHeaderVisibility(true)}
+      className={`sticky top-0 z-40 border-b border-orange-100 bg-[#fff8ef] shadow-xs backdrop-blur-md transition-transform duration-300 ease-in-out motion-reduce:transition-none ${
+        headerVisible ? 'translate-y-0' : '-translate-y-full'
+      }`}
+    >
       {/* Top contact bar — separate from the 80px main navigation */}
       <div className="hidden border-b border-orange-100 bg-[#f7ecdf] px-4 py-1.5 text-xs font-medium text-slate-700 lg:block">
         <div className="mx-auto flex max-w-[1600px] items-center justify-between gap-4">
