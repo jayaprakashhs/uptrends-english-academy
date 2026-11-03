@@ -252,7 +252,7 @@ const authorizedRequest = (path: string, method = 'GET', body?: unknown) =>
   });
 
 test('admission approval PDF contains real student details without fee or payment content', async () => {
-  const bytes = await generateOfficialPdf({
+  const legacyInput = {
     settings: {
       ...DEFAULT_OFFICIAL_DOCUMENT_SETTINGS,
     },
@@ -267,18 +267,22 @@ test('admission approval PDF contains real student details without fee or paymen
       referenceNumber: 'PRIVATE-REFERENCE',
     }]),
     includePaymentDetails: true,
-  });
+  };
+  const bytes = await generateOfficialPdf(
+    legacyInput as unknown as Parameters<typeof generateOfficialPdf>[0],
+  );
   const pdf = await PDFDocument.load(bytes);
   assert.equal(pdf.getPageCount(), 1);
   assert.equal(pdf.getPages()[0].getWidth(), 595.28);
+  assert.equal(pdf.getPages()[0].getHeight(), 841.89);
   const text = decodePdfText(bytes);
   assert.match(text, /ADMISSION CONFIRMATION/);
   assert.match(text, /IELTS Preparation/);
   assert.match(text, /UEA-STU-2026-0001/);
   assert.match(text, /UEA-APP-2026-0001/);
-  assert.doesNotMatch(text, /FEE BREAKDOWN|Course Fee|Net Payable Amount|TERMS & CONDITIONS|Fictional fee conditions/);
+  assert.doesNotMatch(text, /\bfees?\b|FEE BREAKDOWN|Course Fee|Net Payable Amount|TERMS & CONDITIONS|Fictional fee conditions/i);
   assert.doesNotMatch(text, /PAYMENT PENDING|INR 0\.00|Net Payable Amount/);
-  assert.doesNotMatch(text, /Total paid to date|INR 98,765\.00|PRIVATE-REFERENCE|private-payment-id|upi/i);
+  assert.doesNotMatch(text, /payment|paid|balance|transaction|INR|PRIVATE-REFERENCE|private-payment-id|upi/i);
   assert.doesNotMatch(text, /Spoken English|Business English|Other Course/);
 });
 
@@ -327,31 +331,6 @@ test('payment summary totals recorded payments without inferring fees or balance
     totalPaid: 0,
     payments: [],
   });
-
-  test('legacy fee and terms settings are excluded from admission document settings', () => {
-    const legacySettings = mergeOfficialDocumentSettings({
-      ...DEFAULT_OFFICIAL_DOCUMENT_SETTINGS,
-      terms: ['Old fee condition'],
-      paymentInstructions: 'Old fee instructions',
-      sectionHeadings: {
-        ...DEFAULT_OFFICIAL_DOCUMENT_SETTINGS.sectionHeadings,
-        fees: 'Old fee heading',
-        terms: 'Old terms heading',
-      },
-      layout: {
-        ...DEFAULT_OFFICIAL_DOCUMENT_SETTINGS.layout,
-        visibleSections: ['student', 'fees', 'terms'],
-        sectionOrder: ['student', 'fees', 'course', 'terms', 'joining', 'payment'],
-      },
-    });
-    assert.ok(legacySettings);
-    assert.deepEqual(legacySettings.layout.visibleSections, ['student']);
-    assert.deepEqual(legacySettings.layout.sectionOrder, DEFAULT_OFFICIAL_DOCUMENT_SETTINGS.layout.sectionOrder);
-    assert.equal('terms' in legacySettings, false);
-    assert.equal('paymentInstructions' in legacySettings, false);
-    assert.equal('fees' in legacySettings.sectionHeadings, false);
-  });
-
   const payments = [
     { id: 'payment-1', amount: 400, paymentMethod: 'upi', paymentStage: 'first_fee', recordedAt: '2026-10-30T10:00:00Z', referenceNumber: 'REF-1' },
     { id: 'payment-2', amount: 300, paymentMethod: 'cash', paymentStage: 'installment', recordedAt: '2026-10-31T10:00:00Z', referenceNumber: null },
@@ -360,6 +339,32 @@ test('payment summary totals recorded payments without inferring fees or balance
     totalPaid: 700,
     payments,
   });
+});
+
+test('legacy fee and payment settings are excluded from admission document settings', () => {
+  const legacySettings = mergeOfficialDocumentSettings({
+    ...DEFAULT_OFFICIAL_DOCUMENT_SETTINGS,
+    terms: ['Old fee condition'],
+    paymentInstructions: 'Old fee instructions',
+    sectionHeadings: {
+      ...DEFAULT_OFFICIAL_DOCUMENT_SETTINGS.sectionHeadings,
+      fees: 'Old fee heading',
+      payment: 'Old payment heading',
+      terms: 'Old terms heading',
+    },
+    layout: {
+      ...DEFAULT_OFFICIAL_DOCUMENT_SETTINGS.layout,
+      visibleSections: ['student', 'fees', 'course', 'terms', 'joining', 'payment'],
+      sectionOrder: ['student', 'fees', 'course', 'terms', 'joining', 'payment'],
+    },
+  });
+  assert.ok(legacySettings);
+  assert.deepEqual(legacySettings.layout.visibleSections, ['student', 'course', 'joining']);
+  assert.deepEqual(legacySettings.layout.sectionOrder, DEFAULT_OFFICIAL_DOCUMENT_SETTINGS.layout.sectionOrder);
+  assert.equal('terms' in legacySettings, false);
+  assert.equal('paymentInstructions' in legacySettings, false);
+  assert.equal('fees' in legacySettings.sectionHeadings, false);
+  assert.equal('payment' in legacySettings.sectionHeadings, false);
 });
 
 test('admission document preview uses the selected approved application data', async () => {

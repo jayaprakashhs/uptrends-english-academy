@@ -15,7 +15,6 @@ import {
   Compass,
   BookOpen,
   Clock,
-  Award,
   UsersRound,
   GraduationCap,
 } from 'lucide-react';
@@ -236,7 +235,7 @@ export const Home: React.FC<HomeProps> = ({
                 </button>
               </div>
 
-              <div className="grid grid-cols-1 gap-3 border-t border-orange-200 pt-4 text-[11px] font-medium leading-snug text-slate-600 min-[420px]:grid-cols-2 min-[1100px]:grid-cols-3 min-[1100px]:gap-3">
+              <div className="grid grid-cols-1 gap-3 border-t border-orange-200 pt-4 text-[11px] font-medium leading-snug text-slate-600 min-[420px]:grid-cols-2 min-[1100px]:grid-cols-2 min-[1100px]:gap-3">
                 <div className="flex min-w-0 items-center gap-2">
                   <UsersRound className="h-4 w-4 shrink-0 text-emerald-600" />
                   <span>Trusted by 20,000+ Students in Karnataka</span>
@@ -244,10 +243,6 @@ export const Home: React.FC<HomeProps> = ({
                 <div className="flex min-w-0 items-center gap-2">
                   <GraduationCap className="h-4 w-4 shrink-0 text-emerald-600" />
                   <span>Beginner to Advanced Levels</span>
-                </div>
-                <div className="flex min-w-0 items-center gap-2">
-                  <Award className="h-4 w-4 shrink-0 text-emerald-600" />
-                  <span>Affordable Fees</span>
                 </div>
               </div>
             </div>

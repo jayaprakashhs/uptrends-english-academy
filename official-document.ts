@@ -9,7 +9,7 @@ import {
 
 export type OfficialFontFamily = 'Helvetica' | 'TimesRoman' | 'Courier';
 export type OfficialPageSize = 'A4' | 'Letter';
-export type OfficialSection = 'student' | 'course' | 'joining' | 'payment';
+export type OfficialSection = 'student' | 'course' | 'joining';
 
 export interface OfficialDocumentSettings {
   academyName: string;
@@ -110,11 +110,9 @@ export interface OfficialDocumentInput {
   student: OfficialStudent;
   course: OfficialCourse | null;
   joiningInformation?: OfficialJoiningInformation;
-  paymentSummary?: OfficialPaymentSummary;
   assets?: OfficialDocumentAssets;
   versionNumber?: number;
   previewOnly?: boolean;
-  includePaymentDetails?: boolean;
 }
 
 export interface PaymentReceiptInput {
@@ -140,7 +138,6 @@ export const DEFAULT_OFFICIAL_DOCUMENT_SETTINGS: OfficialDocumentSettings = {
     student: 'STUDENT INFORMATION',
     course: 'SELECTED COURSE',
     joining: 'JOINING INFORMATION',
-    payment: 'PAYMENT INFORMATION',
   },
   footerText: "Uptrend's English Academy - Davangere",
   motivationalTagline: 'Learn English • Build Confidence • Achieve More',
@@ -167,7 +164,7 @@ export const DEFAULT_OFFICIAL_DOCUMENT_SETTINGS: OfficialDocumentSettings = {
     showDecorations: true,
     showFooter: true,
     visibleSections: ['student', 'course', 'joining'],
-    sectionOrder: ['student', 'course', 'joining', 'payment'],
+    sectionOrder: ['student', 'course', 'joining'],
   },
 };
 
@@ -694,14 +691,12 @@ export async function generateOfficialPdf({
     return lines.length ? lines : [''];
   };
 
-  const sectionDrawers: Record<Exclude<OfficialSection, 'payment'>, () => void> = {
+  const sectionDrawers: Record<OfficialSection, () => void> = {
     student: drawStudent,
     course: drawCourse,
     joining: drawJoining,
   };
-  const allowedSections: Exclude<OfficialSection, 'payment'>[] = ['student', 'course', 'joining'];
-  const visibleOrder = settings.layout.sectionOrder.filter((section): section is Exclude<OfficialSection, 'payment'> =>
-    allowedSections.includes(section as Exclude<OfficialSection, 'payment'>) &&
+  const visibleOrder = settings.layout.sectionOrder.filter((section) =>
     settings.layout.visibleSections.includes(section),
   );
   for (let index = 0; index < visibleOrder.length; index += 1) {
@@ -762,7 +757,7 @@ export const isValidOfficialDocumentSettings = (
   const settings = value as Partial<OfficialDocumentSettings>;
   const isHexColor = (color: unknown): color is string =>
     typeof color === 'string' && /^#[0-9a-f]{6}$/i.test(color);
-  const sections: OfficialSection[] = ['student', 'course', 'joining', 'payment'];
+  const sections: OfficialSection[] = ['student', 'course', 'joining'];
   return typeof settings.academyName === 'string' &&
     typeof settings.address === 'string' &&
     typeof settings.phone === 'string' &&
@@ -825,7 +820,7 @@ export const mergeOfficialDocumentSettings = (
   const savedLayout = saved.layout && typeof saved.layout === 'object'
     ? saved.layout as Record<string, unknown>
     : {};
-  const sections: OfficialSection[] = ['student', 'course', 'joining', 'payment'];
+  const sections: OfficialSection[] = ['student', 'course', 'joining'];
   const visibleSections = Array.isArray(savedLayout.visibleSections)
     ? savedLayout.visibleSections.filter((section): section is OfficialSection => sections.includes(section as OfficialSection))
     : DEFAULT_OFFICIAL_DOCUMENT_SETTINGS.layout.visibleSections;
@@ -843,7 +838,6 @@ export const mergeOfficialDocumentSettings = (
       student: typeof sectionHeadings.student === 'string' ? sectionHeadings.student : DEFAULT_OFFICIAL_DOCUMENT_SETTINGS.sectionHeadings.student,
       course: typeof sectionHeadings.course === 'string' ? sectionHeadings.course : DEFAULT_OFFICIAL_DOCUMENT_SETTINGS.sectionHeadings.course,
       joining: typeof sectionHeadings.joining === 'string' ? sectionHeadings.joining : DEFAULT_OFFICIAL_DOCUMENT_SETTINGS.sectionHeadings.joining,
-      payment: typeof sectionHeadings.payment === 'string' ? sectionHeadings.payment : DEFAULT_OFFICIAL_DOCUMENT_SETTINGS.sectionHeadings.payment,
     },
     joiningInstructions: Array.isArray(saved.joiningInstructions)
       ? saved.joiningInstructions as string[]
