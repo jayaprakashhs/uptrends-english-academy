@@ -47,6 +47,7 @@ export const DemoClassBookingModal: React.FC<DemoClassBookingModalProps> = ({ is
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const dateOfBirthInputRef = React.useRef<HTMLInputElement | null>(null);
   const contactValidation = useContactDuplicateValidation(form.email, form.mobile, isOpen);
 
   useEffect(() => {
@@ -68,6 +69,23 @@ export const DemoClassBookingModal: React.FC<DemoClassBookingModalProps> = ({ is
   const updateForm = (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = event.currentTarget;
     setForm((current) => ({ ...current, [name]: value }));
+  };
+
+  const openDatePicker = () => {
+    const input = dateOfBirthInputRef.current as (HTMLInputElement & { showPicker?: () => void }) | null;
+    if (!input) return;
+
+    if (typeof input.showPicker === 'function') {
+      try {
+        input.showPicker();
+        return;
+      } catch {
+        input.focus();
+        return;
+      }
+    }
+
+    input.focus();
   };
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -221,7 +239,7 @@ export const DemoClassBookingModal: React.FC<DemoClassBookingModalProps> = ({ is
               </label>
               <label className="text-xs font-bold text-slate-700">
                 Date of Birth *
-                <input name="date_of_birth" type="date" value={form.date_of_birth} onChange={updateForm} required max={today} className={inputClassName} />
+                <input ref={dateOfBirthInputRef} name="date_of_birth" type="date" value={form.date_of_birth} onChange={updateForm} onClick={openDatePicker} required max={today} className={`${inputClassName} cursor-pointer`} />
               </label>
               <label className="text-xs font-bold text-slate-700">
                 City *

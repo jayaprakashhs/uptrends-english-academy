@@ -9,9 +9,37 @@ import {
   type ApplicationCategoryFieldErrors,
   type ApplicationQualificationCategory,
 } from '../../application-request';
-import { CheckCircle2, AlertCircle, Upload, ArrowRight, ShieldCheck, FileCheck, RefreshCw } from 'lucide-react';
+import { CheckCircle2, AlertCircle, Upload, ArrowRight, FileCheck, RefreshCw, Target, GraduationCap, MessageCircle, UsersRound, Clock } from 'lucide-react';
 import { isValidContactEmail, normalizeIndianMobileNumber } from '../../contact-validation';
 import { ContactValidationMessage, useContactDuplicateValidation } from '../hooks/useContactDuplicateValidation';
+
+const applicationBenefits = [
+  {
+    title: 'Personalized guidance',
+    description: 'based on your English proficiency and learning goals.',
+    icon: Target,
+  },
+  {
+    title: 'Beginner-to-advanced training',
+    description: 'to support every stage of your English-learning journey.',
+    icon: GraduationCap,
+  },
+  {
+    title: 'Practical speaking activities',
+    description: 'to improve fluency, vocabulary, and pronunciation.',
+    icon: MessageCircle,
+  },
+  {
+    title: 'Interactive learning sessions',
+    description: 'that encourage confidence and active participation.',
+    icon: UsersRound,
+  },
+  {
+    title: 'Flexible learning support',
+    description: 'to help you balance your English classes with your daily commitments.',
+    icon: Clock,
+  },
+] as const;
 
 interface ApplyNowProps {
   programs: Program[];
@@ -41,6 +69,7 @@ export const ApplyNow: React.FC<ApplyNowProps> = ({
     selectedProgram ? selectedProgram.id : (publishedPrograms[0]?.id || '')
   );
   const [dateOfBirth, setDateOfBirth] = useState('');
+  const dateOfBirthInputRef = React.useRef<HTMLInputElement | null>(null);
   const [address, setAddress] = useState('');
   const [place, setPlace] = useState('');
   const [city, setCity] = useState('');
@@ -59,12 +88,44 @@ export const ApplyNow: React.FC<ApplyNowProps> = ({
   // Submission states
   const [submitting, setSubmitting] = useState(false);
   const [submissionSuccess, setSubmissionSuccess] = useState(false);
+  const [headerStackHeight, setHeaderStackHeight] = useState(0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [categoryErrors, setCategoryErrors] = useState<ApplicationCategoryFieldErrors>({});
   const [categoryValidationAttempted, setCategoryValidationAttempted] = useState(false);
   const primaryEmail = qualificationCategory === 'Student' ? parentEmail : email;
   const primaryMobile = qualificationCategory === 'Student' ? parentPhone : mobile;
   const contactValidation = useContactDuplicateValidation(primaryEmail, primaryMobile);
+
+  const openDatePicker = () => {
+    const input = dateOfBirthInputRef.current as (HTMLInputElement & { showPicker?: () => void }) | null;
+    if (!input) return;
+
+    if (typeof input.showPicker === 'function') {
+      try {
+        input.showPicker();
+        return;
+      } catch {
+        input.focus();
+        return;
+      }
+    }
+
+    input.focus();
+  };
+
+  React.useLayoutEffect(() => {
+    const headerStack = document.querySelector<HTMLElement>('[data-apply-header-stack]');
+    if (!headerStack) return;
+
+    const updateHeaderStackHeight = () => {
+      setHeaderStackHeight(headerStack.getBoundingClientRect().height);
+    };
+    updateHeaderStackHeight();
+
+    const observer = new ResizeObserver(updateHeaderStackHeight);
+    observer.observe(headerStack);
+    return () => observer.disconnect();
+  }, []);
 
   const validateCategoryFields = (overrides: Partial<Record<ApplicationCategoryField, string>> = {}) => (
     validateApplicationCategoryFields({
@@ -251,9 +312,54 @@ export const ApplyNow: React.FC<ApplyNowProps> = ({
   };
 
   return (
-    <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+    <div
+      style={{
+        '--application-workspace-height': `calc(100dvh - ${headerStackHeight}px)`,
+        '--application-sticky-offset': `${headerStackHeight}px`,
+      } as React.CSSProperties}
+      className="grid min-h-full grid-cols-1 bg-[#fff8ef] lg:min-h-[var(--application-workspace-height)] lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]"
+    >
+      <aside className="flex items-start px-5 py-8 sm:px-8 sm:py-10 lg:sticky lg:top-[var(--application-sticky-offset)] lg:h-[var(--application-workspace-height)] lg:self-start lg:px-10 lg:py-6 lg:max-[1439px]:!px-8 lg:max-[1439px]:!py-2">
+        <div className="mx-auto w-full max-w-xl">
+          <p className="mb-3 text-xs font-bold uppercase tracking-[0.14em] text-orange-700">
+            Uptrend’s English Academy
+          </p>
+          <h1 className="text-3xl font-extrabold leading-tight text-slate-950 lg:text-2xl xl:text-3xl lg:max-[1439px]:!text-[26px] lg:max-[1439px]:!leading-[1.15]">
+            Welcome to Uptrend’s English Academy
+          </h1>
+          <p className="mt-4 text-sm leading-6 text-slate-700 sm:text-base sm:leading-6 lg:text-sm lg:max-[1439px]:!mt-2 lg:max-[1439px]:!text-[13px] lg:max-[1439px]:!leading-[18px]">
+            Take the first step toward becoming a confident English speaker with Uptrend’s English Academy. Our practical, learner-focused training programs are designed to help you improve your spoken English, strengthen your communication skills, and express yourself with confidence in everyday life, academics, and the workplace.
+          </p>
+
+          <ul className="mt-5 space-y-3 lg:max-[1439px]:!mt-3 lg:max-[1439px]:!space-y-2">
+            {applicationBenefits.map(({ title, description, icon: Icon }) => (
+              <li key={title} className="flex items-start gap-3 text-sm leading-5 text-slate-700 lg:max-[1439px]:!gap-2 lg:max-[1439px]:!text-xs lg:max-[1439px]:!leading-4">
+                <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-orange-50 text-orange-700 lg:max-[1439px]:!h-6 lg:max-[1439px]:!w-6">
+                  <Icon className="h-4 w-4" aria-hidden="true" />
+                </span>
+                <span><strong className="font-bold text-slate-900">{title}</strong> {description}</span>
+              </li>
+            ))}
+          </ul>
+
+          <div className="mt-5 border-l-2 border-orange-500 pl-4 lg:max-[1439px]:!mt-3 lg:max-[1439px]:!pl-3">
+            <h2 className="text-base font-bold text-slate-950 lg:max-[1439px]:!text-sm lg:max-[1439px]:!leading-[18px]">
+              Start Your English Learning Journey Today
+            </h2>
+            <p className="mt-2 text-sm leading-5 text-slate-600 lg:max-[1439px]:!mt-1.5 lg:max-[1439px]:!text-xs lg:max-[1439px]:!leading-[17px]">
+              Complete the application form to enrol in one of our English communication programs. Our team is here to guide and support you every step of the way.
+            </p>
+            <p className="mt-3 text-sm font-bold leading-5 text-orange-700 lg:max-[1439px]:!mt-2 lg:max-[1439px]:!text-xs lg:max-[1439px]:!leading-[17px]">
+              Your journey to speaking English with confidence starts here!
+            </p>
+          </div>
+        </div>
+      </aside>
+
+      <section className="min-w-0 bg-[#fff8ef] px-4 py-6 sm:px-6 lg:px-8 lg:py-6">
+        <div className="mx-auto max-w-3xl">
       {submissionSuccess ? (
-        <div className="bg-white rounded-3xl border border-slate-200 p-8 sm:p-12 shadow-xl text-center space-y-6">
+        <div className="rounded-xl border border-slate-200 bg-white p-6 text-center shadow-sm sm:p-10">
           <div className="w-20 h-20 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto shadow-sm">
             <CheckCircle2 className="w-12 h-12" />
           </div>
@@ -303,23 +409,21 @@ export const ApplyNow: React.FC<ApplyNowProps> = ({
           </div>
         </div>
       ) : (
-        <div className="bg-white rounded-3xl border border-slate-200/80 shadow-xl overflow-hidden">
-          {/* Header */}
-          <div className="bg-gradient-to-r from-orange-600 to-orange-500 p-8 text-white">
-            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/20 text-xs font-bold uppercase tracking-wider mb-2">
-              <ShieldCheck className="w-4 h-4 text-white" />
-              <span>Official Admission Form</span>
-            </div>
-            <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
-              Apply to Uptrend’s English Academy
-            </h1>
-            <p className="text-xs sm:text-sm text-orange-100 mt-1 max-w-2xl">
-              Fill out the required information below to apply for our spoken English and communication training programs in Davangere.
+        <div className="border border-slate-200 bg-white shadow-sm">
+          <div className="border-b border-slate-100 bg-white px-5 py-5 sm:px-8">
+            <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-orange-700">
+              Admissions application
+            </p>
+            <h2 className="mt-1 text-xl font-bold tracking-tight text-slate-950 sm:text-2xl">
+              Join Our Academy
+            </h2>
+            <p className="mt-1 text-sm text-slate-600">
+              Complete your application to get started.
             </p>
           </div>
 
           {/* Form */}
-          <form noValidate onSubmit={handleSubmit} className="p-8 sm:p-10 space-y-8">
+          <form noValidate onSubmit={handleSubmit} className="space-y-7 p-5 sm:p-8">
             {errorMessage && (
               <div className="p-4 bg-rose-50 border border-rose-200 rounded-2xl flex items-start gap-3 text-rose-800 text-xs">
                 <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
@@ -339,7 +443,7 @@ export const ApplyNow: React.FC<ApplyNowProps> = ({
                 <span>Personal & Academic Details</span>
               </h2>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+              <div className="grid grid-cols-1 gap-5">
                 <div>
                   <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
                     Student Full Name *
@@ -378,7 +482,7 @@ export const ApplyNow: React.FC<ApplyNowProps> = ({
 
               {qualificationCategory !== 'Student' && (
                 <>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                  <div className="grid grid-cols-1 gap-5">
                     <div>
                       <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
                         Mobile Number *
@@ -398,7 +502,7 @@ export const ApplyNow: React.FC<ApplyNowProps> = ({
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                  <div className="grid grid-cols-1 gap-5">
                     <div>
                       <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
                         Email ID *
@@ -424,7 +528,7 @@ export const ApplyNow: React.FC<ApplyNowProps> = ({
               {qualificationCategory === 'Student' && (
                 <div>
                   <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700">Parent / Guardian Details</h3>
-                  <div className="mt-3 grid grid-cols-1 gap-5 sm:grid-cols-2">
+                  <div className="mt-3 grid grid-cols-1 gap-5">
                     <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
                       Parent Phone Number *
                       <input
@@ -500,7 +604,7 @@ export const ApplyNow: React.FC<ApplyNowProps> = ({
               )}
 
               {qualificationCategory === 'Graduate' && (
-                <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+                <div className="grid grid-cols-1 gap-5">
                   <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
                     College Name *
                     <input
@@ -536,7 +640,7 @@ export const ApplyNow: React.FC<ApplyNowProps> = ({
               )}
 
               {qualificationCategory === 'Working' && (
-                <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+                <div className="grid grid-cols-1 gap-5">
                   <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
                     Occupation *
                     <input
@@ -572,7 +676,7 @@ export const ApplyNow: React.FC<ApplyNowProps> = ({
                 </div>
               )}
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+              <div className="grid grid-cols-1 gap-5">
                 <div>
                   <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
                     Selected Program *
@@ -591,19 +695,23 @@ export const ApplyNow: React.FC<ApplyNowProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  <label htmlFor="application-date-of-birth" className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
                     Date of Birth (Optional)
                   </label>
-                  <input
-                    type="date"
-                    value={dateOfBirth}
-                    onChange={(e) => setDateOfBirth(e.target.value)}
-                    className="w-full px-4 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-hidden focus:ring-2 focus:ring-orange-500"
-                  />
+                  <div onClick={openDatePicker} className="w-full cursor-pointer">
+                    <input
+                      ref={dateOfBirthInputRef}
+                      id="application-date-of-birth"
+                      type="date"
+                      value={dateOfBirth}
+                      onChange={(e) => setDateOfBirth(e.target.value)}
+                      className="w-full cursor-pointer px-4 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-hidden focus:ring-2 focus:ring-orange-500"
+                    />
+                  </div>
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+              <div className="grid grid-cols-1 gap-5">
                 <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
                   Place *
                   <input
@@ -677,8 +785,8 @@ export const ApplyNow: React.FC<ApplyNowProps> = ({
                 Upload a recent front-facing passport photograph. Supported formats: JPEG, PNG, WebP. The photo will automatically be compressed to under 300 KB.
               </p>
 
-              <div className="grid grid-cols-1 sm:grid-cols-12 gap-6 items-center">
-                <div className="sm:col-span-8">
+              <div className="grid grid-cols-1 gap-5">
+                <div>
                   <label className="border-2 border-dashed border-slate-300 hover:border-orange-500 rounded-2xl p-6 flex flex-col items-center justify-center text-center cursor-pointer transition-colors bg-slate-50/50 hover:bg-orange-50/20">
                     <Upload className="w-8 h-8 text-slate-400 mb-2" />
                     <span className="text-xs font-bold text-slate-800">
@@ -703,7 +811,7 @@ export const ApplyNow: React.FC<ApplyNowProps> = ({
                   )}
                 </div>
 
-                <div className="sm:col-span-4 flex flex-col items-center justify-center">
+                <div className="flex flex-col items-center justify-center">
                   {photoPreview ? (
                     <div className="space-y-2 text-center">
                       <div className="w-28 h-36 rounded-xl overflow-hidden border-2 border-emerald-500 shadow-md mx-auto relative bg-slate-100">
@@ -759,7 +867,7 @@ export const ApplyNow: React.FC<ApplyNowProps> = ({
                   </>
                 ) : (
                   <>
-                    <span>Submit Student Application</span>
+                    <span>Submit Application</span>
                     <ArrowRight className="w-5 h-5" />
                   </>
                 )}
@@ -771,6 +879,8 @@ export const ApplyNow: React.FC<ApplyNowProps> = ({
           </form>
         </div>
       )}
+        </div>
+      </section>
     </div>
   );
 };

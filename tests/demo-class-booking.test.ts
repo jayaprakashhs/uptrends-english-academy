@@ -80,6 +80,13 @@ test('rejects missing conditional data, invalid email, and future dates', () => 
   assert.equal(futureDate.valid, false);
 });
 
+test('demo booking date field opens its native picker across the input area', async () => {
+  const modal = await readFile(new URL('../src/components/DemoClassBookingModal.tsx', import.meta.url), 'utf8');
+
+  assert.match(modal, /const openDatePicker = \(\) => \{[\s\S]*?input\.showPicker\(\)/);
+  assert.match(modal, /<input ref=\{dateOfBirthInputRef\} name="date_of_birth" type="date"[\s\S]*?onClick=\{openDatePicker\}[\s\S]*?required max=\{today\}/);
+});
+
 test('demo request API validates data before touching storage or database', async () => {
   const response = await handleApiRequest(new Request('https://academy.example/api/demo-class-requests', {
     method: 'POST',

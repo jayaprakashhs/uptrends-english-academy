@@ -230,7 +230,7 @@ export function App() {
 
   return (
     <div className="min-h-screen flex flex-col bg-[#fff8ef] text-slate-900 antialiased selection:bg-orange-500 selection:text-white">
-      <div className="sticky top-0 z-50">
+      <div data-apply-header-stack className="sticky top-0 z-50">
         {/* Moving Announcement Banner (Section 6.B - no close button, Supabase driven) */}
         <div className="relative z-50">
           <AnnouncementBanner
