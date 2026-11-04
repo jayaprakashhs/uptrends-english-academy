@@ -5,6 +5,8 @@ import test from 'node:test';
 const viteConfig = await readFile(new URL('../vite.config.ts', import.meta.url), 'utf8');
 const workerSource = await readFile(new URL('../worker.ts', import.meta.url), 'utf8');
 const workerApiSource = await readFile(new URL('../worker-api.ts', import.meta.url), 'utf8');
+const sitemap = await readFile(new URL('../public/sitemap.xml', import.meta.url), 'utf8');
+const robots = await readFile(new URL('../public/robots.txt', import.meta.url), 'utf8');
 const packageJson = JSON.parse(
   await readFile(new URL('../package.json', import.meta.url), 'utf8'),
 ) as { scripts: { deploy: string } };
@@ -31,4 +33,18 @@ test('deploy script uses the Wrangler config actually emitted by Vite', () => {
   assert.doesNotMatch(workerSource, /scheduled\(/);
   assert.doesNotMatch(workerApiSource, /runPaymentDocumentRecovery|reconcile_payment_document_versions/);
   assert.match(workerApiSource, /`payment:\$\{deletedPaymentId\}:deleted`/);
+});
+
+test('public SEO files list only the canonical public homepage and identify the sitemap', () => {
+  assert.match(sitemap, /^<\?xml version="1\.0" encoding="UTF-8"\?>/);
+  assert.match(sitemap, /<urlset xmlns="http:\/\/www\.sitemaps\.org\/schemas\/sitemap\/0\.9">/);
+  assert.deepEqual([...sitemap.matchAll(/<loc>(.*?)<\/loc>/g)].map(([, url]) => url), [
+    'https://uptrendsenglishacademy.in/',
+  ]);
+  assert.match(robots, /^User-agent: \*\r?\nAllow: \/\r?\n\r?\nSitemap: https:\/\/uptrendsenglishacademy\.in\/sitemap\.xml\s*$/);
+});
+
+test('Worker serves successful static asset responses instead of the SPA fallback', () => {
+  assert.match(workerSource, /const assetResponse = await env\.ASSETS\.fetch\(request\);/);
+  assert.match(workerSource, /if \(assetResponse\.status !== 404\) \{\s*return assetResponse;\s*\}/);
 });
