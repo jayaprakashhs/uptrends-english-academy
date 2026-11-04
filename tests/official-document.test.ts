@@ -476,8 +476,8 @@ test('approval attaches and stores the PDF generated from the immutable issuance
     joining_information: {
       joiningDate: '2026-02-01',
       classSchedule: 'Monday to Saturday',
-      classTimings: '10:00 AM',
-      venue: 'Davangere',
+      classTimings: '8:00 AM – 9:00 AM',
+      venue: 'Davanagere Ram & Co Circle',
     },
   };
   const approvalResult = {
@@ -530,6 +530,15 @@ test('approval attaches and stores the PDF generated from the immutable issuance
       emailPayloads.push(await request.json() as Record<string, unknown>);
       return Response.json({ id: 'resend-message-id' });
     }
+    if (url.pathname === '/rest/v1/applications' && request.method === 'PATCH') {
+      const updates = await request.json() as { joining_information: unknown };
+      assert.deepEqual(updates.joining_information, snapshot.joining_information);
+      return Response.json({
+        id: applicationId,
+        status: 'Pending',
+        joining_information: snapshot.joining_information,
+      });
+    }
     if (url.pathname.endsWith('/rpc/approve_application_with_official_snapshot')) {
       const rpcPayload = await request.json() as Record<string, unknown>;
       assert.equal(rpcPayload.p_application_id, applicationId);
@@ -578,6 +587,10 @@ test('approval attaches and stores the PDF generated from the immutable issuance
   const attachedText = decodePdfText(attachedPdf);
   assert.match(attachedText, /IELTS Preparation/);
   assert.match(attachedText, /UEA-STU-2026-0001/);
+  assert.match(attachedText, /2026-02-01/);
+  assert.match(attachedText, /Monday to Saturday/);
+  assert.match(attachedText, /8:00 AM/);
+  assert.match(attachedText, /Davanagere/);
   assert.doesNotMatch(attachedText, /PAYMENT PENDING|Total Paid|Outstanding Balance|Payment Mode|INR 0\.00/);
   assert.doesNotMatch(attachedText, /Other Course|Spoken English|Business English/);
 });
@@ -617,8 +630,8 @@ test('approval records a failed delivery without exposing an automatic retry end
     joining_information: {
       joiningDate: '2026-02-01',
       classSchedule: 'Monday to Saturday',
-      classTimings: '10:00 AM',
-      venue: 'Davangere',
+      classTimings: '8:00 AM – 9:00 AM',
+      venue: 'Davanagere Ram & Co Circle',
     },
   };
   const application = {
@@ -707,6 +720,13 @@ test('approval records a failed delivery without exposing an automatic retry end
       deliveryStatus = body.status;
       if (request.method === 'POST') notificationCount += 1;
       return Response.json([{ id: 'ffffffff-ffff-4fff-8fff-ffffffffffff', status: deliveryStatus }]);
+    }
+    if (url.pathname === '/rest/v1/applications' && request.method === 'PATCH') {
+      return Response.json({
+        id: applicationId,
+        status: 'Pending',
+        joining_information: snapshot.joining_information,
+      });
     }
     if (url.pathname.endsWith('/applications')) return Response.json([application]);
     if (url.pathname.endsWith('/official_document_issuances')) return Response.json([issuance]);
@@ -813,8 +833,8 @@ test('recorded payment creates and emails an immutable PDF version using snapsho
     joining_information: {
       joiningDate: '2026-11-02',
       classSchedule: 'Monday to Saturday',
-      classTimings: '10:00 AM',
-      venue: 'Davangere',
+      classTimings: '8:00 AM – 9:00 AM',
+      venue: 'Davanagere Ram & Co Circle',
     },
     payment_summary: { total_payable: 10000, total_paid: 4000, outstanding_balance: 6000, status: 'partially_paid' },
   };

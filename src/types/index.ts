@@ -1,4 +1,8 @@
 import type { ApplicationQualificationCategory } from '../../application-request';
+import type { AudienceTag } from '../../audience-tags';
+
+export { AUDIENCE_TAGS, isAudienceTag } from '../../audience-tags';
+export type { AudienceTag } from '../../audience-tags';
 
 export type AdminRole = 'staff' | 'admin' | 'super_admin';
 
@@ -59,6 +63,12 @@ export interface StudentApplication {
   approved_by_user_id?: string | null;
   approved_by_name?: string | null;
   approved_at?: string | null;
+  joining_information?: {
+    joiningDate: string;
+    classSchedule: string;
+    classTimings: string;
+    venue: string;
+  } | null;
   archived_at?: string | null;
   archived_by?: string | null;
   created_at: string;
@@ -105,6 +115,7 @@ export interface MediaItem {
   youtube_video_id?: string | null;
   cover_image_url?: string | null;
   alt_text?: string | null;
+  audience_tag?: AudienceTag | null;
   is_published: boolean;
   display_order: number;
   created_at: string;

@@ -1177,6 +1177,29 @@ test('application and gallery uploads use separate native buckets and content me
     assert.equal(insertedApplications.length, 1);
     assert.equal(insertedApplications[0].photo_object_key, applicationMedia.puts[0].key);
 
+    const missingAudienceResponse = await handleApiRequest(
+      new Request('https://academy.example/api/admin/media', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer test-admin-token',
+        },
+        body: JSON.stringify({
+          title: 'Untagged gallery photo',
+          media_type: 'photo',
+          media_file_base64: 'data:image/jpeg;base64,/9j/2Q==',
+        }),
+      }),
+      {
+        SUPABASE_URL: 'https://project.example',
+        SUPABASE_SERVICE_ROLE_KEY: 'test-service-role-key',
+        CLOUDFLARE_R2_PUBLIC_URL: 'https://media.example',
+        PUBLIC_MEDIA: publicMedia.binding,
+      },
+    );
+    assert.equal(missingAudienceResponse.status, 400);
+    assert.equal(publicMedia.puts.length, 0);
+
     const mediaResponse = await handleApiRequest(
       new Request('https://academy.example/api/admin/media', {
         method: 'POST',
@@ -1187,6 +1210,7 @@ test('application and gallery uploads use separate native buckets and content me
         body: JSON.stringify({
           title: 'Gallery photo',
           media_type: 'photo',
+          audience_tag: 'School Students',
           media_file_base64: 'data:image/jpeg;base64,/9j/2Q==',
         }),
       }),
@@ -1203,6 +1227,7 @@ test('application and gallery uploads use separate native buckets and content me
     assert.equal(publicMedia.puts[0].options?.httpMetadata?.contentType, 'image/jpeg');
     assert.equal(applicationMedia.puts.length, 1);
     assert.equal(insertedMediaItems.length, 1);
+    assert.equal(insertedMediaItems[0].audience_tag, 'School Students');
     assert.equal(insertedMediaItems[0].r2_object_key, publicMedia.puts[0].key);
     assert.equal(insertedMediaItems[0].media_url, `https://media.example/${publicMedia.puts[0].key}`);
   } finally {
@@ -1264,6 +1289,7 @@ test('media display order rejects numbers already assigned to another entry', as
         body: JSON.stringify({
           media_type: 'video',
           title: 'New testimonial',
+          audience_tag: 'Professionals',
           youtube_url: 'https://www.youtube.com/watch?v=abcdefghijk',
           display_order: 2,
         }),
@@ -1284,6 +1310,75 @@ test('media display order rejects numbers already assigned to another entry', as
     assert.equal(updateResponse.status, 409);
     assert.match((await updateResponse.json() as { error: string }).error, /already taken by "Existing duplicate title"/i);
     assert.equal(publicMedia.puts.length, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('media updates validate and persist audience tags', async () => {
+  const originalFetch = globalThis.fetch;
+  const currentId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+  const currentItem = {
+    id: currentId,
+    media_type: 'photo',
+    title: 'Existing gallery photo',
+    caption: null,
+    r2_object_key: null,
+    media_url: 'https://media.example/media/photo.jpg',
+    youtube_url: null,
+    youtube_video_id: null,
+    cover_image_url: null,
+    alt_text: 'Existing gallery photo',
+    audience_tag: null,
+    is_published: true,
+    display_order: 2,
+  };
+  let savedAudience: unknown;
+
+  globalThis.fetch = async (input, init) => {
+    const request = input instanceof Request ? input : new Request(input, init);
+    const url = new URL(request.url);
+    if (url.hostname !== 'project.example') throw new Error(`Unexpected test request: ${url.hostname}${url.pathname}`);
+    if (url.pathname === '/auth/v1/user') return Response.json({ id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' });
+    if (url.pathname === '/rest/v1/admin_profiles') {
+      return Response.json([{
+        id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        full_name: 'Test Admin',
+        role: 'admin',
+        is_active: true,
+      }]);
+    }
+    if (url.pathname === '/rest/v1/media_items' && request.method === 'GET') {
+      if (url.searchParams.get('id') === `eq.${currentId}`) return Response.json([currentItem]);
+      return Response.json([]);
+    }
+    if (url.pathname === '/rest/v1/media_items' && request.method === 'PATCH') {
+      const updates = await request.json() as Record<string, unknown>;
+      savedAudience = updates.audience_tag;
+      return Response.json({ ...currentItem, ...updates });
+    }
+    throw new Error(`Unexpected test request: ${url.hostname}${url.pathname}`);
+  };
+
+  try {
+    const response = await handleApiRequest(
+      new Request(`https://academy.example/api/admin/media/${currentId}`, {
+        method: 'PUT',
+        headers: {
+          Authorization: 'Bearer audience-test-token',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ audience_tag: 'College Students' }),
+      }),
+      {
+        SUPABASE_URL: 'https://project.example',
+        SUPABASE_SERVICE_ROLE_KEY: 'test-service-role-key',
+        CLOUDFLARE_R2_PUBLIC_URL: 'https://media.example',
+      },
+    );
+    assert.equal(response.status, 200);
+    assert.equal(savedAudience, 'College Students');
+    assert.equal((await response.json() as { audience_tag: string }).audience_tag, 'College Students');
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -1345,7 +1440,7 @@ test('native R2 upload failures return errors without persisting application or 
       new Request('https://academy.example/api/admin/media', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer test-session-token' },
-        body: JSON.stringify({ title: 'Gallery photo', media_type: 'photo', media_file_base64: image }),
+        body: JSON.stringify({ title: 'Gallery photo', media_type: 'photo', audience_tag: 'College Students', media_file_base64: image }),
       }),
       {
         SUPABASE_URL: 'https://project.example',
@@ -1421,7 +1516,7 @@ test('database write failures clean up uploads from the matching native bucket',
       new Request('https://academy.example/api/admin/media', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer test-session-token' },
-        body: JSON.stringify({ title: 'Gallery photo', media_type: 'photo', media_file_base64: image }),
+        body: JSON.stringify({ title: 'Gallery photo', media_type: 'photo', audience_tag: 'Homemakers', media_file_base64: image }),
       }),
       {
         SUPABASE_URL: 'https://project.example',
@@ -2161,6 +2256,112 @@ test('About Us image deletion uses private APPLICATION_MEDIA only', async () => 
     assert.equal(response.status, 200);
     assert.deepEqual(applicationMedia.deletes, [objectKey]);
     assert.equal(publicMedia.deletes.length, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('joining information drafts are writable by all existing application approver roles', async () => {
+  const originalFetch = globalThis.fetch;
+  const applicationId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+  const roles = ['staff', 'admin', 'super_admin'] as const;
+  const joiningInformation = {
+    joiningDate: '2026-11-04',
+    classSchedule: 'Monday to Saturday',
+    classTimings: '8:00 AM – 9:00 AM',
+    venue: 'Davanagere Ram & Co Circle',
+  };
+
+  try {
+    globalThis.fetch = async () => {
+      throw new Error('Unauthorized requests must not access Supabase.');
+    };
+    const unauthorizedResponse = await handleApiRequest(new Request(
+      `https://academy.example/api/admin/applications/${applicationId}/joining-information`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ joining_information: joiningInformation }),
+      },
+    ), {
+      SUPABASE_URL: 'https://project.example',
+      SUPABASE_SERVICE_ROLE_KEY: 'test-service-role-key',
+    });
+    assert.equal(unauthorizedResponse.status, 401);
+
+    for (const role of roles) {
+      globalThis.fetch = async (input, init) => {
+        const request = input instanceof Request ? input : new Request(input, init);
+        const url = new URL(request.url);
+        if (url.pathname === '/auth/v1/user') {
+          return Response.json({ id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' });
+        }
+        if (url.pathname === '/rest/v1/admin_profiles') {
+          return Response.json([{
+            id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+            full_name: 'Test Approver',
+            role,
+            is_active: true,
+          }]);
+        }
+        if (url.pathname === `/rest/v1/applications` && request.method === 'PATCH') {
+          const updates = await request.json() as { joining_information: typeof joiningInformation };
+          return Response.json({
+            id: applicationId,
+            status: 'Pending',
+            joining_information: updates.joining_information,
+          });
+        }
+        throw new Error(`Unexpected Supabase request: ${url.pathname}`);
+      };
+
+      const response = await handleApiRequest(new Request(
+        `https://academy.example/api/admin/applications/${applicationId}/joining-information`,
+        {
+          method: 'PUT',
+          headers: { Authorization: 'Bearer test-joining-information-token', 'Content-Type': 'application/json' },
+          body: JSON.stringify({ joining_information: joiningInformation }),
+        },
+      ), {
+        SUPABASE_URL: 'https://project.example',
+        SUPABASE_SERVICE_ROLE_KEY: 'test-service-role-key',
+      });
+
+      assert.equal(response.status, 200, `${role} should retain its existing staff-level application access`);
+      assert.deepEqual((await response.json() as { joining_information: unknown }).joining_information, joiningInformation);
+    }
+
+    globalThis.fetch = async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      const url = new URL(request.url);
+      if (url.pathname === '/auth/v1/user') return Response.json({ id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' });
+      if (url.pathname === '/rest/v1/admin_profiles') {
+        return Response.json([{
+          id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+          full_name: 'Test Staff',
+          role: 'staff',
+          is_active: true,
+        }]);
+      }
+      if (url.pathname === '/rest/v1/applications') {
+        throw new Error('Invalid joining information must not be written.');
+      }
+      throw new Error(`Unexpected Supabase request: ${url.pathname}`);
+    };
+    const invalidResponse = await handleApiRequest(new Request(
+      `https://academy.example/api/admin/applications/${applicationId}/joining-information`,
+      {
+        method: 'PUT',
+        headers: { Authorization: 'Bearer test-joining-information-token', 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          joining_information: { ...joiningInformation, venue: 'To be confirmed' },
+        }),
+      },
+    ), {
+      SUPABASE_URL: 'https://project.example',
+      SUPABASE_SERVICE_ROLE_KEY: 'test-service-role-key',
+    });
+    assert.equal(invalidResponse.status, 400);
   } finally {
     globalThis.fetch = originalFetch;
   }

@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import type { TeamMember } from '../types';
-import { Target, Compass, Heart, Play, Clock, MapPin, Phone, Mail, Award, CheckCircle } from 'lucide-react';
+import { Target, Compass, Heart, Play, Clock, MapPin, Phone, Mail, Award, CheckCircle, ChevronLeft, ChevronRight } from 'lucide-react';
 import { getYouTubeThumbnail, extractYouTubeId } from '../lib/youtube';
 import { supabase } from '../lib/supabase';
 
@@ -20,6 +20,8 @@ export const AboutUs: React.FC<AboutUsProps> = ({
   setCurrentPage,
 }) => {
   const [publishedTeam, setPublishedTeam] = useState<TeamMember[]>([]);
+  const [instructorIndex, setInstructorIndex] = useState(0);
+  const touchStartX = useRef<number | null>(null);
   const [instructorsLoading, setInstructorsLoading] = useState(true);
   const [instructorError, setInstructorError] = useState<string | null>(null);
   const [instructorAssetWarning, setInstructorAssetWarning] = useState<string | null>(null);
@@ -30,6 +32,32 @@ export const AboutUs: React.FC<AboutUsProps> = ({
   const teamTalkVideoId = extractYouTubeId(teamTalkUrl);
   const teamTalkThumb = videoPosterUrl
     || getYouTubeThumbnail(teamTalkVideoId, 'maxresdefault');
+  const instructorListKey = publishedTeam.map((member) => member.id).join('|');
+
+  useEffect(() => {
+    setInstructorIndex(0);
+  }, [instructorListKey]);
+
+  const visibleInstructorIndex = Math.min(instructorIndex, Math.max(0, publishedTeam.length - 1));
+  const goToPreviousInstructor = () => {
+    setInstructorIndex((index) => Math.max(0, Math.min(index, publishedTeam.length - 1) - 1));
+  };
+  const goToNextInstructor = () => {
+    setInstructorIndex((index) => Math.min(publishedTeam.length - 1, index + 1));
+  };
+  const handleInstructorTouchStart = (event: React.TouchEvent<HTMLElement>) => {
+    touchStartX.current = event.changedTouches[0]?.clientX ?? null;
+  };
+  const handleInstructorTouchEnd = (event: React.TouchEvent<HTMLElement>) => {
+    const startX = touchStartX.current;
+    touchStartX.current = null;
+    const endX = event.changedTouches[0]?.clientX;
+    if (startX === null || endX === undefined) return;
+    const distance = endX - startX;
+    if (Math.abs(distance) < 50) return;
+    if (distance < 0) goToNextInstructor();
+    else goToPreviousInstructor();
+  };
 
   useEffect(() => {
     let active = true;
@@ -105,6 +133,35 @@ export const AboutUs: React.FC<AboutUsProps> = ({
     };
   }, []);
 
+  const renderInstructorCard = (member: TeamMember) => (
+    <article
+      key={member.id}
+      className="relative flex min-h-[25rem] w-full flex-col items-center rounded-2xl border border-slate-100 bg-white px-6 pb-9 pt-16 text-center shadow-[0_12px_35px_rgba(15,35,65,0.08)]"
+    >
+      {member.photo_url ? (
+        <img
+          src={member.photo_url}
+          alt={member.full_name}
+          className="absolute left-1/2 top-0 h-24 w-24 -translate-x-1/2 -translate-y-1/2 rounded-full border-4 border-orange-500 bg-white object-cover shadow-md"
+        />
+      ) : (
+        <div
+          aria-hidden="true"
+          className="absolute left-1/2 top-0 flex h-24 w-24 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-4 border-orange-500 bg-orange-100 text-2xl font-bold text-orange-700 shadow-md"
+        >
+          {member.full_name.charAt(0)}
+        </div>
+      )}
+      <h3 className="break-words text-xl font-bold leading-snug text-[#0B1F4D]">{member.full_name}</h3>
+      <p className="mt-1 break-words text-sm font-semibold leading-snug text-orange-600">{member.designation}</p>
+      <span aria-hidden="true" className="my-4 h-px w-14 bg-orange-400" />
+      {member.qualifications && (
+        <p className="text-sm italic leading-relaxed text-slate-500">{member.qualifications}</p>
+      )}
+      <p className="mt-5 w-full whitespace-pre-wrap break-words text-center text-sm leading-7 text-slate-500">{member.bio}</p>
+    </article>
+  );
+
   return (
     <div className="space-y-16 py-12">
       {/* 1. Header Banner & About the Academy */}
@@ -123,14 +180,14 @@ export const AboutUs: React.FC<AboutUsProps> = ({
       </section>
 
       {/* 2. Meet Our Team (Admin managed, no invented staff) */}
-      <section className="relative isolate mx-auto max-w-7xl overflow-hidden rounded-3xl bg-[#f3f8fc] px-4 py-10 sm:px-6 sm:py-12 lg:px-8">
+      <section className="relative isolate mx-auto max-w-7xl overflow-hidden rounded-3xl bg-[#fff8ef] px-4 py-10 sm:px-6 sm:py-12 lg:px-8">
         <span aria-hidden="true" className="pointer-events-none absolute -left-12 top-24 h-40 w-40 rounded-full bg-sky-100/80" />
         <span aria-hidden="true" className="pointer-events-none absolute -right-10 bottom-8 h-52 w-52 rounded-full bg-orange-50/90" />
-        <div className="relative z-10 mb-12">
+        <div className="relative z-10 mb-12 text-center lg:text-left">
           <h2 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-950">
             Meet Our <span className="text-orange-600">Instructors</span>
           </h2>
-          <p className="mt-2 max-w-2xl text-sm text-slate-600">
+          <p className="mx-auto mt-2 max-w-2xl text-sm text-slate-600 lg:mx-0">
             Experienced mentors dedicated to student progress and spoken English excellence.
           </p>
         </div>
@@ -144,34 +201,39 @@ export const AboutUs: React.FC<AboutUsProps> = ({
             {instructorAssetWarning && (
               <p role="status" className="mb-4 text-center text-xs text-amber-700">{instructorAssetWarning}</p>
             )}
-            <div className="relative z-10 grid grid-cols-1 items-stretch gap-x-8 gap-y-16 pt-12 sm:grid-cols-2 lg:grid-cols-3">
+            <div
+              className="relative z-10 mx-auto flex max-w-lg items-stretch gap-x-4 px-10 pb-7 pt-12 lg:hidden"
+              onTouchStart={handleInstructorTouchStart}
+              onTouchEnd={handleInstructorTouchEnd}
+            >
+              <button
+                type="button"
+                onClick={goToPreviousInstructor}
+                disabled={visibleInstructorIndex === 0}
+                aria-label="Previous instructor"
+                className="absolute left-0 top-1/2 z-20 -translate-y-1/2 rounded-full border border-slate-200 bg-white p-2 text-[#0B1F4D] shadow-md transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <ChevronLeft className="h-5 w-5" />
+              </button>
+              <div className="w-full">
+                {renderInstructorCard(publishedTeam[visibleInstructorIndex])}
+              </div>
+              <button
+                type="button"
+                onClick={goToNextInstructor}
+                disabled={visibleInstructorIndex >= publishedTeam.length - 1}
+                aria-label="Next instructor"
+                className="absolute right-0 top-1/2 z-20 -translate-y-1/2 rounded-full border border-slate-200 bg-white p-2 text-[#0B1F4D] shadow-md transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <ChevronRight className="h-5 w-5" />
+              </button>
+              <p className="absolute bottom-0 left-1/2 -translate-x-1/2 text-xs font-medium tabular-nums text-slate-500">
+                {visibleInstructorIndex + 1} / {publishedTeam.length}
+              </p>
+            </div>
+            <div className="relative z-10 hidden grid-cols-1 items-stretch gap-x-8 gap-y-16 pt-12 lg:grid lg:grid-cols-3">
               {publishedTeam.map((member) => (
-                <article
-                  key={member.id}
-                  className="relative flex min-h-[25rem] w-full flex-col items-center rounded-2xl border border-slate-100 bg-white px-6 pb-9 pt-16 text-center shadow-[0_12px_35px_rgba(15,35,65,0.08)]"
-                >
-                  {member.photo_url ? (
-                    <img
-                      src={member.photo_url}
-                      alt={member.full_name}
-                      className="absolute left-1/2 top-0 h-24 w-24 -translate-x-1/2 -translate-y-1/2 rounded-full border-4 border-orange-500 bg-white object-cover shadow-md"
-                    />
-                  ) : (
-                    <div
-                      aria-hidden="true"
-                      className="absolute left-1/2 top-0 flex h-24 w-24 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-4 border-orange-500 bg-orange-100 text-2xl font-bold text-orange-700 shadow-md"
-                    >
-                      {member.full_name.charAt(0)}
-                    </div>
-                  )}
-                  <h3 className="break-words text-xl font-bold leading-snug text-[#0B1F4D]">{member.full_name}</h3>
-                  <p className="mt-1 break-words text-sm font-semibold leading-snug text-orange-600">{member.designation}</p>
-                  <span aria-hidden="true" className="my-4 h-px w-14 bg-orange-400" />
-                  {member.qualifications && (
-                    <p className="text-sm italic leading-relaxed text-slate-500">{member.qualifications}</p>
-                  )}
-                  <p className="mt-5 w-full whitespace-pre-wrap break-words text-center text-sm leading-7 text-slate-500">{member.bio}</p>
-                </article>
+                renderInstructorCard(member)
               ))}
             </div>
           </>
@@ -288,7 +350,7 @@ export const AboutUs: React.FC<AboutUsProps> = ({
       </section>
 
       {/* 5. Academy In Action video introduction */}
-      <section className="mx-auto flex h-[calc(100svh-6rem)] w-full max-w-7xl flex-col px-4 py-2 sm:px-6 lg:h-[calc(100svh-8rem)] lg:px-8 lg:py-2">
+      <section className="mx-auto flex h-auto w-full max-w-7xl flex-col px-4 py-2 sm:px-6 lg:h-[calc(100svh-8rem)] lg:px-8 lg:py-2">
         <div className="shrink-0 text-center">
           <span className="text-xs font-bold uppercase tracking-wider text-orange-600">
             Academy In Action
@@ -307,7 +369,7 @@ export const AboutUs: React.FC<AboutUsProps> = ({
           )}
         </div>
 
-        <div className="mt-6 flex min-h-0 flex-1 items-center justify-center">
+        <div className="mt-4 flex min-h-0 flex-none items-center justify-center lg:mt-6 lg:flex-1">
           <div
             className="relative aspect-video max-w-full overflow-hidden rounded-2xl border border-slate-200/80 bg-[#fff8ef] shadow-md"
             style={{ width: 'min(100%, calc((100svh - 10rem) * 16 / 9))' }}
@@ -341,8 +403,8 @@ export const AboutUs: React.FC<AboutUsProps> = ({
 
       {/* 6. Contact Details & Business Hours */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="bg-white rounded-3xl border border-slate-200/80 p-8 sm:p-10 shadow-lg">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-center">
+        <div className="rounded-3xl border border-slate-200/80 bg-white p-4 shadow-lg sm:p-8 lg:p-10">
+          <div className="grid grid-cols-1 items-center gap-6 md:grid-cols-2 md:gap-8">
             <div className="space-y-4">
               <span className="text-xs font-bold uppercase tracking-wider text-orange-600">
                 Direct Contact
@@ -372,25 +434,25 @@ export const AboutUs: React.FC<AboutUsProps> = ({
               </div>
             </div>
 
-            <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200 space-y-4">
+            <div className="space-y-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 sm:p-6">
               <div className="flex items-center gap-2 text-slate-900 font-bold text-sm">
                 <Clock className="w-5 h-5 text-orange-600" />
                 <span>Regular Business Hours</span>
               </div>
               <div className="space-y-1.5 text-xs">
-                <div className="flex justify-between py-1 border-b border-slate-200">
+                <div className="flex flex-wrap justify-between gap-x-3 gap-y-1 border-b border-slate-200 py-1">
                   <span className="text-slate-600">Monday – Saturday</span>
                   <span className="font-semibold text-slate-900">8:00 AM – 8:30 PM</span>
                 </div>
-                <div className="flex justify-between py-1">
+                <div className="flex flex-wrap justify-between gap-x-3 gap-y-1 py-1">
                   <span className="text-slate-600">Sunday</span>
                   <span className="font-semibold text-rose-600">Closed</span>
                 </div>
               </div>
-              <div className="pt-2 flex gap-3">
+              <div className="flex flex-col gap-2 pt-2 sm:flex-row sm:gap-3">
                 <button
                   onClick={openCallbackModal}
-                  className="w-full py-2.5 rounded-lg bg-orange-600 text-white font-bold text-xs hover:bg-orange-500 transition-colors cursor-pointer"
+                  className="min-h-11 w-full rounded-lg bg-orange-600 px-3 py-2.5 text-center text-xs font-bold leading-snug text-white transition-colors hover:bg-orange-500"
                 >
                   Request a Call
                 </button>
@@ -399,7 +461,7 @@ export const AboutUs: React.FC<AboutUsProps> = ({
                     setCurrentPage('contact');
                     window.scrollTo({ top: 0, behavior: 'smooth' });
                   }}
-                  className="w-full py-2.5 rounded-lg border border-slate-300 text-slate-700 font-bold text-xs hover:bg-slate-100 transition-colors cursor-pointer"
+                  className="min-h-11 w-full rounded-lg border border-slate-300 px-3 py-2.5 text-center text-xs font-bold leading-snug text-slate-700 transition-colors hover:bg-slate-100"
                 >
                   View Map & Directions
                 </button>

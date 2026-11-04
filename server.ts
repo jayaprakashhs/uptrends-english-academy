@@ -16,6 +16,7 @@ import {
   normalizeIndianMobileNumber,
 } from './contact-validation';
 import { renderBrandedEmail, type EmailBranding } from './email-template';
+import { isAudienceTag } from './audience-tags';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -954,6 +955,7 @@ app.post('/api/admin/media', async (req, res) => {
       media_file_mime,
       media_url,
       cover_file_base64,
+      audience_tag,
     } = req.body || {};
 
     if (!title || !title.trim()) {
@@ -962,6 +964,9 @@ app.post('/api/admin/media', async (req, res) => {
 
     if (media_type !== 'photo' && media_type !== 'video') {
       return res.status(400).json({ error: 'Media type must be photo or video.' });
+    }
+    if (!isAudienceTag(audience_tag)) {
+      return res.status(400).json({ error: 'A valid audience_tag is required.' });
     }
     const displayOrder = display_order === undefined ? 0 : Number(display_order);
     if (!Number.isInteger(displayOrder)) {
@@ -1082,6 +1087,7 @@ app.post('/api/admin/media', async (req, res) => {
       youtube_video_id: youtubeVideoId,
       cover_image_url: storedCoverUrl,
       alt_text: alt_text || title.trim(),
+      audience_tag,
       is_published: is_published !== false,
       display_order: displayOrder,
       created_at: new Date().toISOString(),
@@ -1136,6 +1142,7 @@ app.put('/api/admin/media/:id', async (req, res) => {
       media_file_mime,
       media_url,
       cover_file_base64,
+      audience_tag,
     } = req.body || {};
 
     let item: any = null;
@@ -1149,6 +1156,9 @@ app.put('/api/admin/media/:id', async (req, res) => {
 
     if (!item) {
       return res.status(404).json({ error: 'Media item not found.' });
+    }
+    if (audience_tag !== undefined && !isAudienceTag(audience_tag)) {
+      return res.status(400).json({ error: 'audience_tag must be one of the supported audience tags.' });
     }
 
     const nextDisplayOrder = display_order === undefined ? item.display_order : Number(display_order);
@@ -1318,6 +1328,7 @@ app.put('/api/admin/media/:id', async (req, res) => {
       youtube_url: nextYoutube || null,
       youtube_video_id: nextYoutubeId,
       cover_image_url: nextCoverImageUrl,
+      audience_tag: audience_tag !== undefined ? audience_tag : item.audience_tag ?? null,
       is_published: is_published !== undefined ? Boolean(is_published) : item.is_published,
       display_order: nextDisplayOrder,
       updated_at: new Date().toISOString(),
@@ -1599,6 +1610,9 @@ app.post('/api/callback-request', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+// Route application joining-information writes explicitly through the shared Worker handler.
+app.put('/api/admin/applications/:id/joining-information', dispatchWorkerApi);
 
 // Route document, payment, and demo-request workflows through the shared Worker handlers.
 app.all(

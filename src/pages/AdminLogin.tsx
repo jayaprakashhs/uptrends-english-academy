@@ -78,8 +78,10 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onLoginSuccess, setCurre
   };
 
   return (
-    <div className="min-h-[80vh] flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-md w-full">
+    <div className="relative isolate flex min-h-[80vh] items-center justify-center overflow-hidden bg-[#fff8ef] py-12 px-4 sm:px-6 lg:px-8">
+      <span aria-hidden="true" className="pointer-events-none absolute -left-12 top-24 h-40 w-40 rounded-full bg-sky-100/80" />
+      <span aria-hidden="true" className="pointer-events-none absolute -right-10 bottom-8 h-52 w-52 rounded-full bg-orange-50/90" />
+      <div className="relative z-10 max-w-md w-full">
         <button
           type="button"
           onClick={() => setCurrentPage('home')}

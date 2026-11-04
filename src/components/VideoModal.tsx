@@ -21,7 +21,7 @@ export const VideoModal: React.FC<VideoModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
-      <div className="relative w-full max-w-4xl bg-slate-900 rounded-2xl overflow-hidden shadow-2xl border border-slate-700">
+      <div className="relative max-h-[calc(100dvh-2rem)] w-full max-w-[600px] overflow-hidden rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl">
         <div className="flex items-center justify-between px-6 py-4 bg-slate-950 text-white border-b border-slate-800">
           <h3 className="font-bold text-sm sm:text-base text-slate-100 truncate pr-4">{title}</h3>
           <button
@@ -33,7 +33,7 @@ export const VideoModal: React.FC<VideoModalProps> = ({
           </button>
         </div>
 
-        <div className="relative aspect-video w-full bg-black">
+        <div className="relative aspect-video max-h-[calc(100dvh-7rem)] w-full bg-black">
           {videoId ? (
             <iframe
               src={`https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&rel=0`}

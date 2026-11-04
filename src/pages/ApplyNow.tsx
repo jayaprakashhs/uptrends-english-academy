@@ -12,32 +12,38 @@ import {
 import { CheckCircle2, AlertCircle, Upload, ArrowRight, FileCheck, RefreshCw, Target, GraduationCap, MessageCircle, UsersRound, Clock } from 'lucide-react';
 import { isValidContactEmail, normalizeIndianMobileNumber } from '../../contact-validation';
 import { ContactValidationMessage, useContactDuplicateValidation } from '../hooks/useContactDuplicateValidation';
+import { PremiumDropdown } from '../components/PremiumDropdown';
 
 const applicationBenefits = [
   {
-    title: 'Personalized guidance',
-    description: 'based on your English proficiency and learning goals.',
+    title: 'Personalized Guidance',
+    description: 'Learn at your level and pace.',
     icon: Target,
   },
   {
-    title: 'Beginner-to-advanced training',
-    description: 'to support every stage of your English-learning journey.',
+    title: 'All-Level Training',
+    description: 'Beginner to advanced programs.',
     icon: GraduationCap,
   },
   {
-    title: 'Practical speaking activities',
-    description: 'to improve fluency, vocabulary, and pronunciation.',
+    title: 'Speaking Practice',
+    description: 'Improve fluency and pronunciation.',
     icon: MessageCircle,
   },
   {
-    title: 'Interactive learning sessions',
-    description: 'that encourage confidence and active participation.',
+    title: 'Interactive Sessions',
+    description: 'Learn through active participation.',
     icon: UsersRound,
   },
   {
-    title: 'Flexible learning support',
-    description: 'to help you balance your English classes with your daily commitments.',
+    title: 'Flexible Learning',
+    description: 'Fit classes into your schedule.',
     icon: Clock,
+  },
+  {
+    title: 'Progress Guidance',
+    description: 'Get feedback to improve continuously.',
+    icon: RefreshCw,
   },
 ] as const;
 
@@ -317,27 +323,27 @@ export const ApplyNow: React.FC<ApplyNowProps> = ({
         '--application-workspace-height': `calc(100dvh - ${headerStackHeight}px)`,
         '--application-sticky-offset': `${headerStackHeight}px`,
       } as React.CSSProperties}
-      className="grid min-h-full grid-cols-1 bg-[#fff8ef] lg:min-h-[var(--application-workspace-height)] lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]"
+      className="grid grid-cols-1 bg-[#fff8ef] lg:min-h-[var(--application-workspace-height)] lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]"
     >
-      <aside className="flex items-start px-5 py-8 sm:px-8 sm:py-10 lg:sticky lg:top-[var(--application-sticky-offset)] lg:h-[var(--application-workspace-height)] lg:self-start lg:px-10 lg:py-6 lg:max-[1439px]:!px-8 lg:max-[1439px]:!py-2">
+      <aside className="flex items-start px-5 py-8 sm:px-8 sm:py-10 lg:sticky lg:top-[var(--application-sticky-offset)] lg:self-start lg:px-10 lg:py-6 lg:max-[1439px]:!px-8 lg:max-[1439px]:!py-2">
         <div className="mx-auto w-full max-w-xl">
-          <p className="mb-3 text-xs font-bold uppercase tracking-[0.14em] text-orange-700">
-            Uptrend’s English Academy
-          </p>
           <h1 className="text-3xl font-extrabold leading-tight text-slate-950 lg:text-2xl xl:text-3xl lg:max-[1439px]:!text-[26px] lg:max-[1439px]:!leading-[1.15]">
             Welcome to Uptrend’s English Academy
           </h1>
-          <p className="mt-4 text-sm leading-6 text-slate-700 sm:text-base sm:leading-6 lg:text-sm lg:max-[1439px]:!mt-2 lg:max-[1439px]:!text-[13px] lg:max-[1439px]:!leading-[18px]">
-            Take the first step toward becoming a confident English speaker with Uptrend’s English Academy. Our practical, learner-focused training programs are designed to help you improve your spoken English, strengthen your communication skills, and express yourself with confidence in everyday life, academics, and the workplace.
+          <p className="mt-3 text-sm leading-6 text-slate-700 sm:text-base sm:leading-6 lg:text-sm lg:max-[1439px]:!mt-2 lg:max-[1439px]:!text-[13px] lg:max-[1439px]:!leading-[18px]">
+            Build confidence in spoken English with practical training designed for everyday life, academics, and professional success.
           </p>
 
-          <ul className="mt-5 space-y-3 lg:max-[1439px]:!mt-3 lg:max-[1439px]:!space-y-2">
+          <h2 className="mt-5 text-base font-bold text-slate-950 lg:max-[1439px]:!mt-3 lg:max-[1439px]:!text-sm">
+            Why Choose Us?
+          </h2>
+          <ul className="mt-3 grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2 lg:max-[1439px]:!mt-2 lg:max-[1439px]:!gap-x-3 lg:max-[1439px]:!gap-y-2">
             {applicationBenefits.map(({ title, description, icon: Icon }) => (
-              <li key={title} className="flex items-start gap-3 text-sm leading-5 text-slate-700 lg:max-[1439px]:!gap-2 lg:max-[1439px]:!text-xs lg:max-[1439px]:!leading-4">
-                <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-orange-50 text-orange-700 lg:max-[1439px]:!h-6 lg:max-[1439px]:!w-6">
-                  <Icon className="h-4 w-4" aria-hidden="true" />
+              <li key={title} className="flex items-start gap-2 text-sm leading-5 text-slate-700 lg:max-[1439px]:!gap-1.5 lg:max-[1439px]:!text-[11px] lg:max-[1439px]:!leading-[15px]">
+                <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-orange-50 text-orange-700 lg:max-[1439px]:!h-6 lg:max-[1439px]:!w-6">
+                  <Icon className="h-3.5 w-3.5" aria-hidden="true" />
                 </span>
-                <span><strong className="font-bold text-slate-900">{title}</strong> {description}</span>
+                <span><strong className="block font-bold text-slate-900">{title}</strong>{description}</span>
               </li>
             ))}
           </ul>
@@ -347,10 +353,10 @@ export const ApplyNow: React.FC<ApplyNowProps> = ({
               Start Your English Learning Journey Today
             </h2>
             <p className="mt-2 text-sm leading-5 text-slate-600 lg:max-[1439px]:!mt-1.5 lg:max-[1439px]:!text-xs lg:max-[1439px]:!leading-[17px]">
-              Complete the application form to enrol in one of our English communication programs. Our team is here to guide and support you every step of the way.
+              Complete the application form and take your first step toward confident communication.
             </p>
             <p className="mt-3 text-sm font-bold leading-5 text-orange-700 lg:max-[1439px]:!mt-2 lg:max-[1439px]:!text-xs lg:max-[1439px]:!leading-[17px]">
-              Your journey to speaking English with confidence starts here!
+              Speak with confidence. Grow with Uptrend!
             </p>
           </div>
         </div>
@@ -462,20 +468,22 @@ export const ApplyNow: React.FC<ApplyNowProps> = ({
                   <label htmlFor="application-qualification-category" className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
                     Qualification Category *
                   </label>
-                  <select
+                  <PremiumDropdown
                     id="application-qualification-category"
+                    name="qualification_category"
                     required
                     value={qualificationCategory}
-                    onChange={(event) => handleQualificationCategoryChange(event.target.value as ApplicationQualificationCategory | '')}
+                    onChange={(value) => handleQualificationCategoryChange(value as ApplicationQualificationCategory | '')}
                     aria-invalid={Boolean(categoryErrors.qualification_category)}
                     aria-describedby={categoryErrors.qualification_category ? categoryErrorId('qualification_category') : undefined}
                     className={`w-full px-4 py-2.5 rounded-xl border text-sm focus:outline-hidden focus:ring-2 focus:ring-orange-500 bg-white ${categoryErrors.qualification_category ? 'border-rose-600' : 'border-slate-300'}`}
-                  >
-                    <option value="">Select category</option>
-                    <option value="Student">Student</option>
-                    <option value="Graduate">Graduate</option>
-                    <option value="Working">Working</option>
-                  </select>
+                    placeholder="Select category"
+                    options={[
+                      { value: 'Student', label: 'Student' },
+                      { value: 'Graduate', label: 'Graduate' },
+                      { value: 'Working', label: 'Working' },
+                    ]}
+                  />
                   {renderCategoryError('qualification_category')}
                 </div>
               </div>
@@ -681,17 +689,16 @@ export const ApplyNow: React.FC<ApplyNowProps> = ({
                   <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
                     Selected Program *
                   </label>
-                  <select
+                  <PremiumDropdown
+                    id="application-selected-program"
                     value={programId}
-                    onChange={(e) => setProgramId(e.target.value)}
+                    onChange={setProgramId}
                     className="w-full px-4 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-hidden focus:ring-2 focus:ring-orange-500 bg-white"
-                  >
-                    {programs.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.title} {p.level ? `(${p.level})` : ''}
-                      </option>
-                    ))}
-                  </select>
+                    options={programs.map((program) => ({
+                      value: program.id,
+                      label: `${program.title} ${program.level ? `(${program.level})` : ''}`,
+                    }))}
+                  />
                 </div>
 
                 <div>

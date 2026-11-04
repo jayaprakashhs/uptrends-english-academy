@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { AlertCircle, CheckCircle2, X } from 'lucide-react';
 import { isValidIndianMobileNumber } from '../../demo-class-request';
 import { ContactValidationMessage, useContactDuplicateValidation } from '../hooks/useContactDuplicateValidation';
+import { PremiumDropdown } from './PremiumDropdown';
 
 interface DemoClassBookingModalProps {
   isOpen: boolean;
@@ -190,15 +191,24 @@ export const DemoClassBookingModal: React.FC<DemoClassBookingModalProps> = ({ is
                 <input name="email" type="email" value={form.email} onChange={updateForm} onBlur={() => void contactValidation.validateEmail(form.email)} aria-invalid={contactValidation.emailCheck.duplicate || Boolean(contactValidation.emailCheck.error)} aria-describedby="demo-email-validation" required maxLength={320} autoComplete="email" className={`${inputClassName} ${contactValidation.emailCheck.duplicate || contactValidation.emailCheck.error ? 'border-rose-600' : ''}`} />
                 <ContactValidationMessage id="demo-email-validation" state={contactValidation.emailCheck} />
               </label>
-              <label className="text-xs font-bold text-slate-700">
-                Qualification Category *
-                <select name="qualification_category" value={form.qualification_category} onChange={updateForm} required className={inputClassName}>
-                  <option value="">Select category</option>
-                  <option value="Student">Student</option>
-                  <option value="Graduate">Graduate</option>
-                  <option value="Working">Working</option>
-                </select>
-              </label>
+              <div className="text-xs font-bold text-slate-700">
+                <label htmlFor="demo-qualification-category">Qualification Category *</label>
+                <PremiumDropdown
+                  id="demo-qualification-category"
+                  name="qualification_category"
+                  aria-label="Qualification Category"
+                  value={form.qualification_category}
+                  onChange={(value) => setForm((current) => ({ ...current, qualification_category: value as DemoClassForm['qualification_category'] }))}
+                  required
+                  placeholder="Select category"
+                  className={inputClassName}
+                  options={[
+                    { value: 'Student', label: 'Student' },
+                    { value: 'Graduate', label: 'Graduate' },
+                    { value: 'Working', label: 'Working' },
+                  ]}
+                />
+              </div>
 
               {form.qualification_category === 'Student' && (
                 <>

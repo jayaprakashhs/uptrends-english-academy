@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { PremiumDropdown } from '../components/PremiumDropdown';
 
 import {
   DEFAULT_OFFICIAL_DOCUMENT_SETTINGS,
@@ -17,6 +18,7 @@ import {
   Program,
   Announcement,
   MediaItem,
+  AUDIENCE_TAGS,
   FAQ,
   SiteBranding,
 } from '../types';
@@ -47,6 +49,7 @@ import {
   Menu,
   X,
   ExternalLink,
+  Music2,
   Palette,
   ShieldCheck,
   GraduationCap,
@@ -55,9 +58,19 @@ import {
   UserCog,
 } from 'lucide-react';
 import { extractYouTubeId } from '../lib/youtube';
+import { getWhatsAppUrl } from '../lib/whatsapp';
 import { fetchSystemStatus, type IntegrationHealth, type SystemStatus } from '../lib/systemStatus';
 import { AdminDemoClassRequests } from '../components/AdminDemoClassRequests';
 import { AboutUsManagement } from '../components/AboutUsManagement';
+import {
+  DEFAULT_JOINING_INFORMATION,
+  JOINING_CLASS_SCHEDULES,
+  JOINING_CLASS_TIMINGS,
+  getJoiningInformationErrors,
+  isValidJoiningInformation,
+  normalizeJoiningInformation,
+  type JoiningInformationSettings,
+} from '../../joining-information';
 
 interface AdminPortalProps {
   currentAdmin: AdminProfile;
@@ -109,6 +122,9 @@ const integrationStatusClass = (health: IntegrationHealth | undefined): string =
   }
   return health?.configured ? 'bg-amber-100 text-amber-800' : 'bg-slate-200 text-slate-700';
 };
+
+const isAudioMediaUrl = (url: string): boolean =>
+  /\.(?:aac|aif|aiff|flac|m4a|mp3|oga|ogg|opus|wav)(?:$|[?#])/i.test(url);
 
 export const AdminPortal: React.FC<AdminPortalProps> = ({
   currentAdmin,
@@ -266,6 +282,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   const [programs, setPrograms] = useState<Program[]>([]);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [mediaItems, setMediaItems] = useState<MediaItem[]>([]);
+  const [mediaPreview, setMediaPreview] = useState<MediaItem | null>(null);
+  const [mediaPreviewPlaybackError, setMediaPreviewPlaybackError] = useState<string | null>(null);
   const [mediaFilter, setMediaFilter] = useState<'all' | 'photo' | 'video'>('all');
   const [mediaSearch, setMediaSearch] = useState('');
   const [faqs, setFaqs] = useState<FAQ[]>([]);
@@ -274,13 +292,6 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   const [branding, setBranding] = useState<SiteBranding | null>(null);
   const [editingBranding, setEditingBranding] = useState<BrandingEditor | null>(null);
   
-type JoiningInformationSettings = {
-  joiningDate: string;
-  classSchedule: string;
-  classTimings: string;
-  venue: string;
-};
-
 interface OfficialDocumentVersion {
   version_number: number;
   issuance_type: 'approval' | 'payment_update';
@@ -289,13 +300,6 @@ interface OfficialDocumentVersion {
   generated_at: string | null;
   created_at: string;
 }
-
-const DEFAULT_JOINING_INFORMATION: JoiningInformationSettings = {
-  joiningDate: '',
-  classSchedule: '',
-  classTimings: '',
-  venue: '',
-};
 
 const [officialDocumentSettings, setOfficialDocumentSettings] =
   useState<OfficialDocumentSettings>({ ...DEFAULT_OFFICIAL_DOCUMENT_SETTINGS });
@@ -306,6 +310,31 @@ const [pendingOfficialLogo, setPendingOfficialLogo] = useState<string | null>(nu
 const [pendingOfficialGraphic, setPendingOfficialGraphic] = useState<string | null>(null);
 const [officialLogoPreviewUrl, setOfficialLogoPreviewUrl] = useState<string | null>(null);
 const [officialGraphicPreviewUrl, setOfficialGraphicPreviewUrl] = useState<string | null>(null);
+const mediaPreviewVideoId = mediaPreview?.media_type === 'video'
+  ? extractYouTubeId(mediaPreview.youtube_url || mediaPreview.youtube_video_id)
+  : null;
+const mediaPreviewVideoUrl = mediaPreview?.media_type === 'video' && mediaPreview.media_url && !extractYouTubeId(mediaPreview.media_url)
+  ? mediaPreview.media_url
+  : null;
+const mediaPreviewAudioUrl = mediaPreview?.media_url && isAudioMediaUrl(mediaPreview.media_url)
+  ? mediaPreview.media_url
+  : null;
+useEffect(() => {
+  if (!mediaPreview) return;
+
+  const previousOverflow = document.body.style.overflow;
+  const closeOnEscape = (event: KeyboardEvent) => {
+    if (event.key === 'Escape') setMediaPreview(null);
+  };
+
+  document.body.style.overflow = 'hidden';
+  window.addEventListener('keydown', closeOnEscape);
+
+  return () => {
+    document.body.style.overflow = previousOverflow;
+    window.removeEventListener('keydown', closeOnEscape);
+  };
+}, [mediaPreview]);
 useEffect(() => {
   if (!officialPdfPreviewUrl) return;
 
@@ -333,6 +362,7 @@ useEffect(() => {
     title: '',
     caption: '',
     alt_text: '',
+    audience_tag: null,
     youtube_url: '',
     cover_image_url: '',
     is_published: true,
@@ -369,6 +399,12 @@ useEffect(() => {
     message: string;
   } | null>(null);
   const [applicationJoiningInfo, setApplicationJoiningInfo] = useState<JoiningInformationSettings>({ ...DEFAULT_JOINING_INFORMATION });
+  const [joiningInformationSaveStatus, setJoiningInformationSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const selectedApplicationIdRef = useRef<string | null>(null);
+  const joiningInformationDraftsRef = useRef(new Map<string, JoiningInformationSettings>());
+  const joiningInformationVersionsRef = useRef(new Map<string, number>());
+  const joiningInformationTimersRef = useRef(new Map<string, number>());
+  const joiningInformationSaveQueueRef = useRef(new Map<string, Promise<boolean>>());
 
   const [selectedCallback, setSelectedCallback] = useState<CallbackRequest | null>(null);
   const [appPhotoModal, setAppPhotoModal] = useState<string | null>(null);
@@ -423,6 +459,110 @@ useEffect(() => {
       throw new Error(message);
     }
     return data;
+  };
+
+  const queueJoiningInformationSave = (
+    applicationId: string,
+    information: JoiningInformationSettings,
+    version: number,
+  ): Promise<boolean> => {
+    const previousSave = joiningInformationSaveQueueRef.current.get(applicationId) || Promise.resolve(true);
+    const savePromise = previousSave.then(async () => {
+      try {
+        const updated = await requestJson(`/api/admin/applications/${applicationId}/joining-information`, {
+          method: 'PUT',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({ joining_information: information }),
+        });
+        if (!updated || updated.id !== applicationId) {
+          throw new Error('The saved joining information response was invalid.');
+        }
+        setApplications((items) => items.map((item) => item.id === applicationId ? updated : item));
+        if (joiningInformationVersionsRef.current.get(applicationId) === version) {
+          joiningInformationDraftsRef.current.delete(applicationId);
+          if (selectedApplicationIdRef.current === applicationId) {
+            setJoiningInformationSaveStatus('saved');
+          }
+        }
+        return true;
+      } catch (error) {
+        if (joiningInformationVersionsRef.current.get(applicationId) === version) {
+          if (selectedApplicationIdRef.current === applicationId) {
+            setJoiningInformationSaveStatus('error');
+          }
+          setActionMessage({
+            type: 'error',
+            text: error instanceof Error ? `Joining information could not be saved: ${error.message}` : 'Joining information could not be saved.',
+          });
+        }
+        return false;
+      }
+    });
+    joiningInformationSaveQueueRef.current.set(applicationId, savePromise);
+    void savePromise.then(() => {
+      if (joiningInformationSaveQueueRef.current.get(applicationId) === savePromise) {
+        joiningInformationSaveQueueRef.current.delete(applicationId);
+      }
+    });
+    return savePromise;
+  };
+
+  const scheduleJoiningInformationSave = (
+    applicationId: string,
+    information: JoiningInformationSettings,
+  ) => {
+    const version = (joiningInformationVersionsRef.current.get(applicationId) || 0) + 1;
+    joiningInformationVersionsRef.current.set(applicationId, version);
+    joiningInformationDraftsRef.current.set(applicationId, information);
+    if (selectedApplicationIdRef.current === applicationId) {
+      setJoiningInformationSaveStatus('saving');
+    }
+    const previousTimer = joiningInformationTimersRef.current.get(applicationId);
+    if (previousTimer !== undefined) window.clearTimeout(previousTimer);
+    const timer = window.setTimeout(() => {
+      joiningInformationTimersRef.current.delete(applicationId);
+      void queueJoiningInformationSave(applicationId, information, version);
+    }, 400);
+    joiningInformationTimersRef.current.set(applicationId, timer);
+  };
+
+  const updateJoiningInformationField = (
+    field: keyof JoiningInformationSettings,
+    value: string,
+  ) => {
+    const updatedInformation = { ...applicationJoiningInfo, [field]: value };
+    setApplicationJoiningInfo(updatedInformation);
+    setActionMessage(null);
+    if (selectedApp?.status === 'Pending') {
+      scheduleJoiningInformationSave(selectedApp.id, updatedInformation);
+    }
+  };
+
+  const openApplicationReview = (application: StudentApplication) => {
+    selectedApplicationIdRef.current = application.id;
+    setJoiningInformationSaveStatus('idle');
+    setApplicationJoiningInfo(normalizeJoiningInformation(
+      joiningInformationDraftsRef.current.get(application.id) ?? application.joining_information,
+    ));
+    setSelectedApp(application);
+  };
+
+  const closeApplicationReview = () => {
+    if (selectedApp) {
+      const { id } = selectedApp;
+      const timer = joiningInformationTimersRef.current.get(id);
+      if (timer !== undefined) {
+        window.clearTimeout(timer);
+        joiningInformationTimersRef.current.delete(id);
+        const draft = joiningInformationDraftsRef.current.get(id);
+        const version = joiningInformationVersionsRef.current.get(id);
+        if (draft && version !== undefined) {
+          void queueJoiningInformationSave(id, draft, version);
+        }
+      }
+    }
+    selectedApplicationIdRef.current = null;
+    setSelectedApp(null);
   };
 
   const notifyPublicDataChanged = () => window.dispatchEvent(new Event('admin-data-updated'));
@@ -812,20 +952,27 @@ const resetOfficialDocumentSettings = () => {
 
   // Action: Approve Application (with official PDF verification & email)
   const handleApproveApp = async (appId: string) => {
-    const requiredJoiningFields: Array<[keyof JoiningInformationSettings, string]> = [
-      ['joiningDate', 'Joining date'],
-      ['classSchedule', 'Class schedule'],
-      ['classTimings', 'Class timings'],
-      ['venue', 'Venue'],
-    ];
-    const missingJoiningField = requiredJoiningFields.find(([key]) => !applicationJoiningInfo[key].trim() || applicationJoiningInfo[key].trim().toLowerCase() === 'to be confirmed');
-    if (missingJoiningField) {
-      setActionMessage({ type: 'error', text: `${missingJoiningField[1]} must be completed before approval. Replace “To be confirmed” with the final details.` });
+    const joiningInformationErrors = getJoiningInformationErrors(applicationJoiningInfo);
+    if (!isValidJoiningInformation(applicationJoiningInfo)) {
+      setActionMessage({
+        type: 'error',
+        text: Object.values(joiningInformationErrors)[0] || 'Complete all joining information before approval.',
+      });
       return;
     }
     setActionMessage(null);
     setLoading(true);
     try {
+      const version = (joiningInformationVersionsRef.current.get(appId) || 0) + 1;
+      joiningInformationVersionsRef.current.set(appId, version);
+      joiningInformationDraftsRef.current.set(appId, applicationJoiningInfo);
+      const pendingTimer = joiningInformationTimersRef.current.get(appId);
+      if (pendingTimer !== undefined) {
+        window.clearTimeout(pendingTimer);
+        joiningInformationTimersRef.current.delete(appId);
+      }
+      const joiningInformationSaved = await queueJoiningInformationSave(appId, applicationJoiningInfo, version);
+      if (!joiningInformationSaved) return;
       const res = await fetchAdmin('/api/approve-application', {
         method: 'POST',
         headers: getAuthHeaders(),
@@ -845,6 +992,7 @@ const resetOfficialDocumentSettings = () => {
         type: 'success',
         text: `Application approved! Official PDF attached and approval email triggered (${data.email_status}).`,
       });
+      selectedApplicationIdRef.current = null;
       setSelectedApp(null);
       await fetchAllData();
     } catch (err: any) {
@@ -1298,6 +1446,7 @@ const res = await fetchAdmin(url, {
       title: '',
       caption: '',
       alt_text: '',
+      audience_tag: null,
       youtube_url: '',
       cover_image_url: '',
       is_published: true,
@@ -1430,6 +1579,9 @@ const res = await fetchAdmin(url, {
       if (!payload.title) {
         throw new Error('Media title is required.');
       }
+      if (!payload.audience_tag || !AUDIENCE_TAGS.includes(payload.audience_tag)) {
+        throw new Error('Select an audience tag before saving this entry.');
+      }
 
       if (payload.media_type === 'photo' && !media_file_base64 && !mediaForm.media_url) {
         throw new Error('Upload a photo before saving this gallery entry.');
@@ -1489,7 +1641,7 @@ const res = await fetchAdmin(url, {
       const res = await fetchAdmin(`/api/admin/media/${item.id}`, {
         method: 'PUT',
         headers: getAuthHeaders(),
-        body: JSON.stringify({ ...item, is_published: !item.is_published }),
+        body: JSON.stringify({ is_published: !item.is_published }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to update publication status.');
@@ -1536,11 +1688,14 @@ const res = await fetchAdmin(url, {
   // Filtered applications
   const filteredApplications = applications
     .filter((app) => {
-      const matchesSearch =
-        app.student_name.toLowerCase().includes(appSearch.toLowerCase()) ||
-        app.application_reference.toLowerCase().includes(appSearch.toLowerCase()) ||
-        app.mobile.includes(appSearch) ||
-        app.email.toLowerCase().includes(appSearch.toLowerCase());
+      const searchTerm = appSearch.trim().toLocaleLowerCase();
+      const matchesSearch = !searchTerm || [
+        app.student_name,
+        app.application_reference,
+        app.mobile,
+        app.email,
+        app.occupation,
+      ].some((value) => value?.toLocaleLowerCase().includes(searchTerm));
 
       const matchesStatus = appFilterStatus === 'All' || app.status === appFilterStatus;
       return matchesSearch && matchesStatus;
@@ -1609,6 +1764,20 @@ const res = await fetchAdmin(url, {
         .admin-responsive-shell input, .admin-responsive-shell select, .admin-responsive-shell textarea { max-width: 100%; min-width: 0; }
         .admin-responsive-shell img, .admin-responsive-shell iframe, .admin-responsive-shell video { max-width: 100%; }
         .admin-responsive-shell [role="dialog"], .admin-responsive-shell .fixed.inset-0 > div { max-width: calc(100vw - 1.5rem); }
+        .admin-responsive-shell [role="dialog"].media-preview-dialog {
+          width: min(600px, calc(100vw - 2rem));
+          max-width: 600px;
+        }
+        @media (min-width: 1024px) {
+          .admin-responsive-shell .fixed.inset-0 > .application-review-dialog {
+            width: min(760px, calc(100vw - 2rem));
+            max-width: 760px;
+          }
+          .admin-responsive-shell .fixed.inset-0 > .application-delete-dialog {
+            width: min(440px, calc(100vw - 2rem));
+            max-width: 440px;
+          }
+        }
         .admin-responsive-shell .whitespace-nowrap { white-space: nowrap; }
         .admin-responsive-shell > header {
           color: white; border-color: rgba(255,255,255,.12);
@@ -1729,12 +1898,129 @@ const res = await fetchAdmin(url, {
           .admin-responsive-shell > header .text-lg { font-size: 1rem; }
           .admin-responsive-shell > header .uppercase { font-size: 9px; }
           .admin-responsive-shell main { padding: .75rem; }
-          .admin-responsive-shell main h1 { font-size: 1.35rem; line-height: 1.35; }
+          .admin-responsive-shell main h1 { font-size: 1.2rem; line-height: 1.3; }
+          .admin-responsive-shell main h2 { font-size: 1rem; line-height: 1.35; }
+          .admin-responsive-shell main h3 { font-size: .9rem; line-height: 1.35; }
           .admin-responsive-shell main h2 { overflow-wrap: anywhere; }
           .admin-responsive-shell main .flex-wrap, .admin-responsive-shell main .flex.items-center.justify-between { gap: .625rem; }
           .admin-responsive-shell main button { max-width: 100%; }
           .admin-responsive-shell main table { min-width: 1050px; width: max-content; table-layout: auto; }
           .admin-responsive-shell aside { width: min(18rem, 86vw); }
+          .admin-responsive-shell main .space-y-6 > :not([hidden]) ~ :not([hidden]) { margin-top: 1rem; }
+          .admin-responsive-shell main .space-y-5 > :not([hidden]) ~ :not([hidden]) { margin-top: .875rem; }
+          .admin-responsive-shell main .space-y-4 > :not([hidden]) ~ :not([hidden]) { margin-top: .75rem; }
+          .admin-responsive-shell main .gap-6 { gap: 1rem; }
+          .admin-responsive-shell main .gap-5 { gap: .875rem; }
+          .admin-responsive-shell main section.rounded-2xl.border.bg-white,
+          .admin-responsive-shell main article.rounded-2xl.border.bg-white,
+          .admin-responsive-shell main form.rounded-2xl.border.bg-white {
+            padding: .875rem;
+          }
+          .admin-responsive-shell main .dashboard-welcome { padding: 1rem; }
+          .admin-responsive-shell main .dashboard-welcome h1 { font-size: 1.25rem; }
+          .admin-responsive-shell main [aria-label="Academy statistics"] {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: .625rem;
+          }
+          .admin-responsive-shell main .dashboard-stat { padding: .75rem; }
+          .admin-responsive-shell main .dashboard-stat .text-3xl { margin-top: .375rem; font-size: 1.625rem; line-height: 1.2; }
+          .admin-responsive-shell main .dashboard-stat .h-10,
+          .admin-responsive-shell main .dashboard-stat .w-10 { height: 2rem; width: 2rem; }
+          .admin-responsive-shell main .dashboard-stat .h-5,
+          .admin-responsive-shell main .dashboard-stat .w-5 { height: 1rem; width: 1rem; }
+          .admin-responsive-shell main .dashboard-stat > .mt-3 { margin-top: .5rem; }
+          .admin-responsive-shell main .dashboard-stat > .mt-3.text-\\[11px\\] { font-size: 10px; line-height: 1.35; }
+          .admin-responsive-shell main .dashboard-stat .mt-3.inline-flex { margin-top: .5rem; font-size: 10px; line-height: 1.35; }
+          .admin-responsive-shell main .dashboard-welcome p,
+          .admin-responsive-shell main section.rounded-2xl.border.bg-white p,
+          .admin-responsive-shell main article.rounded-2xl.border.bg-white p {
+            line-height: 1.45;
+          }
+          .admin-responsive-shell main .rounded-2xl.border.bg-white .mb-5 { margin-bottom: .75rem; }
+          .admin-responsive-shell main .demo-class-request-list,
+          .admin-responsive-shell main .callback-request-list { gap: .625rem; }
+          .admin-responsive-shell main .demo-class-request-card,
+          .admin-responsive-shell main .callback-request-card {
+            padding: .75rem;
+            border-radius: .875rem;
+          }
+          .admin-responsive-shell main .demo-class-request-card.space-y-4 > :not([hidden]) ~ :not([hidden]),
+          .admin-responsive-shell main .callback-request-card.space-y-4 > :not([hidden]) ~ :not([hidden]) {
+            margin-top: .625rem;
+          }
+          .admin-responsive-shell main .demo-class-request-card > div:first-child,
+          .admin-responsive-shell main .callback-request-card > div:first-child {
+            gap: .5rem;
+            padding-bottom: .5rem;
+          }
+          .admin-responsive-shell main .demo-class-request-card > div:first-child h2,
+          .admin-responsive-shell main .callback-request-card > div:first-child h2 {
+            font-size: .9rem;
+            line-height: 1.3;
+          }
+          .admin-responsive-shell main .demo-class-request-card > div:first-child p,
+          .admin-responsive-shell main .callback-request-card > div:first-child p {
+            margin-top: .25rem;
+            font-size: 10px;
+          }
+          .admin-responsive-shell main .demo-class-request-card > div:first-child > div:last-child,
+          .admin-responsive-shell main .callback-request-card > div:first-child > label {
+            width: 7.25rem;
+          }
+          .admin-responsive-shell main .demo-class-request-card > div:nth-child(2),
+          .admin-responsive-shell main .callback-request-card > div:nth-child(2) {
+            gap: .5rem;
+            font-size: 11px;
+            line-height: 1.35;
+          }
+          .admin-responsive-shell main .demo-class-request-card > div:nth-child(2) > *,
+          .admin-responsive-shell main .callback-request-card > div:nth-child(2) > * {
+            min-width: 0;
+            overflow-wrap: anywhere;
+          }
+          .admin-responsive-shell main .demo-class-request-card > div:nth-child(3),
+          .admin-responsive-shell main .callback-request-card > div:last-child {
+            gap: .5rem;
+            padding-top: .5rem;
+          }
+          .admin-responsive-shell main .callback-request-card > p {
+            padding: .5rem;
+            font-size: 10px;
+            line-height: 1.4;
+            overflow-wrap: anywhere;
+          }
+          .admin-responsive-shell main .demo-class-request-card button,
+          .admin-responsive-shell main .callback-request-card button {
+            min-height: 2.5rem;
+            padding-inline: .625rem;
+            font-size: 11px;
+          }
+          .admin-responsive-shell main .callback-request-list { gap: .5rem; }
+          .admin-responsive-shell main .callback-request-card {
+            padding: .625rem;
+          }
+          .admin-responsive-shell main .callback-request-card > div:first-child {
+            padding-bottom: .375rem;
+          }
+          .admin-responsive-shell main .callback-request-card > div:first-child h2 {
+            font-size: .85rem;
+          }
+          .admin-responsive-shell main .callback-request-card > div:first-child > label {
+            width: 6.5rem;
+          }
+          .admin-responsive-shell main .callback-request-card > div:nth-child(2) {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: .375rem .5rem;
+            font-size: 10px;
+          }
+          .admin-responsive-shell main .callback-request-card > p {
+            padding: .5rem;
+          }
+          .admin-responsive-shell main .callback-request-card button {
+            min-height: 2.375rem;
+            padding-inline: .5rem;
+            font-size: 10px;
+          }
         }
         @media (prefers-reduced-motion: reduce) {
           .admin-responsive-shell *, .admin-responsive-shell *::before, .admin-responsive-shell *::after {
@@ -1834,7 +2120,7 @@ const res = await fetchAdmin(url, {
             sidebarOpen ? 'translate-x-0' : '-translate-x-full'
           }`}
         >
-          <div className="p-4 space-y-1 overflow-y-auto">
+          <div className="px-4 pb-4 pt-0 space-y-1 overflow-y-auto">
             <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400 px-3 py-2">
               Navigation Menu
             </div>
@@ -1848,9 +2134,10 @@ const res = await fetchAdmin(url, {
                   : item.id === 'callbacks'
                     ? pendingRequestCounts.callbacks
                     : 0;
+              const label = item.label.trim();
               const accessibleLabel = pendingCount > 0
-                ? `${item.label}, ${pendingCount} pending`
-                : item.label;
+                ? `${label}, ${pendingCount} pending`
+                : label;
               return (
                 <button
                   key={item.id}
@@ -1866,7 +2153,7 @@ const res = await fetchAdmin(url, {
                   }`}
                 >
                   <Icon className={`w-4 h-4 ${isActive ? 'text-blue-600' : 'text-slate-400'}`} />
-                  <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                  <span className="min-w-0 flex-1 truncate">{label}</span>
                   {pendingCount > 0 && (
                     <span
                       aria-hidden="true"
@@ -2208,7 +2495,7 @@ const res = await fetchAdmin(url, {
                 <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
                 <input
                   type="text"
-                  placeholder="Search by student name, ref, mobile, or email..."
+                  placeholder="Search by student name, ref, mobile, email, or occupation..."
                   value={appSearch}
                   onChange={(e) => {
                     setAppSearch(e.target.value);
@@ -2300,16 +2587,16 @@ const res = await fetchAdmin(url, {
                           <button
                             type="button"
                             disabled={loading}
-                            onClick={() => { setApplicationJoiningInfo({ ...DEFAULT_JOINING_INFORMATION }); setSelectedApp(app); }}
-                            className="min-h-10 rounded-lg bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-200 disabled:opacity-50"
+                            onClick={() => openApplicationReview(app)}
+                            className="col-span-2 min-h-10 rounded-lg bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-200 disabled:opacity-50"
                           >
-                            Review
+                            View
                           </button>
                           {app.status === 'Pending' && (
                             <button
                               type="button"
                               disabled={loading}
-                              onClick={() => { setApplicationJoiningInfo({ ...DEFAULT_JOINING_INFORMATION }); setSelectedApp(app); }}
+                              onClick={() => openApplicationReview(app)}
                               className="col-span-2 min-h-10 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white shadow-xs transition-colors hover:bg-emerald-700 disabled:opacity-50"
                               title="Open review and complete joining information before approval"
                             >
@@ -2390,22 +2677,22 @@ const res = await fetchAdmin(url, {
                 </button>
               </header>
 
-              <section aria-label="Callback request totals" className="grid grid-cols-1 gap-3 min-[400px]:grid-cols-2 xl:grid-cols-4">
+              <section aria-label="Callback request totals" className="callback-summary-stats grid grid-cols-2 gap-2 sm:gap-3 xl:grid-cols-4">
                 {[
                   { label: 'Total Requests', count: callbacks.length, description: 'All callback enquiries', icon: PhoneCall, styles: 'border-blue-100 bg-blue-50 text-blue-800', iconStyles: 'bg-blue-100 text-blue-700' },
                   { label: 'Pending', count: callbacks.filter((callback) => callback.status === 'Pending').length, description: 'Awaiting first contact', icon: ClockIcon, styles: 'border-orange-100 bg-orange-50 text-orange-800', iconStyles: 'bg-orange-100 text-orange-700' },
                   { label: 'Contacted', count: callbacks.filter((callback) => callback.status === 'Contacted').length, description: 'Follow-up in progress', icon: Users, styles: 'border-violet-100 bg-violet-50 text-violet-800', iconStyles: 'bg-violet-100 text-violet-700' },
                   { label: 'Completed', count: callbacks.filter((callback) => callback.status === 'Completed').length, description: 'Requests completed', icon: CheckCircle, styles: 'border-emerald-100 bg-emerald-50 text-emerald-800', iconStyles: 'bg-emerald-100 text-emerald-700' },
                 ].map(({ label, count, description, icon: Icon, styles, iconStyles }) => (
-                  <article key={label} className={`rounded-2xl border p-4 shadow-sm sm:p-5 ${styles}`}>
-                    <div className="flex items-start justify-between gap-3">
+                  <article key={label} className={`callback-summary-stat rounded-2xl border p-3 shadow-sm sm:p-5 ${styles}`}>
+                    <div className="flex items-start justify-between gap-2 sm:gap-3">
                       <div>
-                        <p className="text-xs font-bold">{label}</p>
-                        <p className="mt-2 text-3xl font-extrabold tracking-tight text-[#0B1F4D]">{callbacksLoading ? '—' : count}</p>
-                        <p className="mt-1 text-[11px] opacity-80">{description}</p>
+                        <p className="text-[10px] font-bold leading-tight sm:text-xs">{label}</p>
+                        <p className="mt-1 text-2xl font-extrabold tracking-tight text-[#0B1F4D] sm:mt-2 sm:text-3xl">{callbacksLoading ? '—' : count}</p>
+                        <p className="mt-1 text-[9px] leading-tight opacity-80 sm:text-[11px]">{description}</p>
                       </div>
-                      <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl ${iconStyles}`}>
-                        <Icon className="h-5 w-5" aria-hidden="true" />
+                      <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-xl sm:h-10 sm:w-10 ${iconStyles}`}>
+                        <Icon className="h-4 w-4 sm:h-5 sm:w-5" aria-hidden="true" />
                       </span>
                     </div>
                   </article>
@@ -2424,17 +2711,20 @@ const res = await fetchAdmin(url, {
                     className="min-h-11 w-full rounded-xl border border-slate-200 py-2 pl-9 pr-3 text-sm outline-none transition focus:border-orange-500 focus:ring-2 focus:ring-orange-100"
                   />
                 </label>
-                <label className="flex min-h-11 items-center justify-between gap-3 rounded-xl border border-slate-200 px-3 text-xs font-bold text-slate-600 sm:justify-start">
-                  Status
-                  <select
+                <div className="flex min-h-11 items-center justify-between gap-3 rounded-xl border border-slate-200 px-3 text-xs font-bold text-slate-600 sm:justify-start">
+                  <span>Status</span>
+                  <PremiumDropdown
+                    id="callback-status-filter"
                     aria-label="Filter callback requests by status"
                     value={callbackFilterStatus}
-                    onChange={(event) => setCallbackFilterStatus(event.target.value as typeof callbackFilterStatus)}
+                    onChange={(value) => setCallbackFilterStatus(value as typeof callbackFilterStatus)}
                     className="min-h-9 min-w-32 rounded-lg bg-white px-2 text-sm text-[#0B1F4D] outline-none focus-visible:ring-2 focus-visible:ring-orange-500"
-                  >
-                    {(['All', 'Pending', 'Contacted', 'Completed'] as const).map((status) => <option key={status} value={status}>{status === 'All' ? 'All statuses' : status}</option>)}
-                  </select>
-                </label>
+                    options={(['All', 'Pending', 'Contacted', 'Completed'] as const).map((status) => ({
+                      value: status,
+                      label: status === 'All' ? 'All statuses' : status,
+                    }))}
+                  />
+                </div>
               </div>
 
               {callbacksError && filteredCallbacks.length > 0 && (
@@ -2468,9 +2758,18 @@ const res = await fetchAdmin(url, {
                                 {callback.email && <p className="mt-1 max-w-48 truncate text-[11px] text-slate-500">{callback.email}</p>}
                               </td>
                               <td className="px-4 py-4">
-                                <a href={`tel:${callback.mobile.replace(/[^\d+]/g, '')}`} className="inline-flex items-center gap-1.5 font-semibold text-emerald-700 hover:text-emerald-800">
-                                  <PhoneCall className="h-3.5 w-3.5" aria-hidden="true" />{callback.mobile}
-                                </a>
+                                <span className="inline-flex items-center gap-1.5">
+                                  <a href={`tel:${callback.mobile.replace(/[^\d+]/g, '')}`} aria-label={`Call ${callback.mobile}`} title="Call" className="shrink-0 text-emerald-700 hover:text-emerald-800">
+                                    <PhoneCall className="h-3.5 w-3.5" aria-hidden="true" />
+                                  </a>
+                                  {getWhatsAppUrl(callback.mobile) ? (
+                                    <a href={getWhatsAppUrl(callback.mobile)!} target="_blank" rel="noopener noreferrer" aria-label={`Chat with ${callback.mobile} on WhatsApp`} onClick={(event) => event.stopPropagation()} className="font-semibold text-emerald-700 hover:text-emerald-800">
+                                      {callback.mobile}
+                                    </a>
+                                  ) : (
+                                    <span className="font-semibold text-emerald-700">{callback.mobile}</span>
+                                  )}
+                                </span>
                               </td>
                               <td className="max-w-44 px-4 py-4 font-medium text-slate-700">{callback.program_name}</td>
                               <td className="px-4 py-4">
@@ -2483,16 +2782,15 @@ const res = await fetchAdmin(url, {
                                 {new Date(callback.created_at).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}
                               </td>
                               <td className="px-4 py-4">
-                                <label className="sr-only" htmlFor={`callback-status-${callback.id}`}>Status for {callback.full_name}</label>
-                                <select
+                                <PremiumDropdown
                                   id={`callback-status-${callback.id}`}
                                   value={callback.status}
                                   disabled={loading}
-                                  onChange={(event) => handleCallbackStatusChange(callback, event.target.value as CallbackRequest['status'])}
+                                  onChange={(value) => handleCallbackStatusChange(callback, value as CallbackRequest['status'])}
                                   className={`min-h-9 w-32 rounded-lg border px-2.5 text-xs font-bold outline-none focus-visible:ring-2 focus-visible:ring-orange-500 disabled:opacity-60 ${callback.status === 'Completed' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : callback.status === 'Contacted' ? 'border-blue-200 bg-blue-50 text-blue-800' : 'border-amber-200 bg-amber-50 text-amber-800'}`}
-                                >
-                                  {(['Pending', 'Contacted', 'Completed'] as const).map((status) => <option key={status} value={status}>{status}</option>)}
-                                </select>
+                                  aria-label={`Status for ${callback.full_name}`}
+                                  options={(['Pending', 'Contacted', 'Completed'] as const).map((status) => ({ value: status, label: status }))}
+                                />
                               </td>
                               <td className="px-5 py-4">
                                 <div className="flex justify-end gap-2">
@@ -2516,9 +2814,9 @@ const res = await fetchAdmin(url, {
                     </div>
                   </section>
 
-                  <div className="grid gap-3 md:grid-cols-2 xl:hidden">
+                  <div className="callback-request-list grid gap-3 md:grid-cols-2 xl:hidden">
                     {filteredCallbacks.map((callback) => (
-                      <article key={callback.id} className="min-w-0 space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition-shadow hover:shadow-md sm:p-5">
+                      <article key={callback.id} className="callback-request-card min-w-0 space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition-shadow hover:shadow-md sm:p-5">
                         <div className="flex items-start justify-between gap-3 border-b border-slate-100 pb-3">
                           <div className="min-w-0">
                             <h2 className="break-words font-bold text-[#0B1F4D]">{callback.full_name}</h2>
@@ -2528,21 +2826,29 @@ const res = await fetchAdmin(url, {
                           </div>
                           <label className="w-32 shrink-0 space-y-1 text-[10px] font-bold uppercase tracking-wide text-slate-500">
                             Status
-                            <select
+                            <PremiumDropdown
                               aria-label={`Status for ${callback.full_name}`}
                               value={callback.status}
                               disabled={loading}
-                              onChange={(event) => handleCallbackStatusChange(callback, event.target.value as CallbackRequest['status'])}
+                              onChange={(value) => handleCallbackStatusChange(callback, value as CallbackRequest['status'])}
                               className={`min-h-9 w-full rounded-lg border px-2 text-xs font-bold normal-case tracking-normal outline-none focus-visible:ring-2 focus-visible:ring-orange-500 disabled:opacity-60 ${callback.status === 'Completed' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : callback.status === 'Contacted' ? 'border-blue-200 bg-blue-50 text-blue-800' : 'border-amber-200 bg-amber-50 text-amber-800'}`}
-                            >
-                              {(['Pending', 'Contacted', 'Completed'] as const).map((status) => <option key={status} value={status}>{status}</option>)}
-                            </select>
+                              options={(['Pending', 'Contacted', 'Completed'] as const).map((status) => ({ value: status, label: status }))}
+                            />
                           </label>
                         </div>
                         <div className="grid gap-3 text-xs sm:grid-cols-2">
-                          <a href={`tel:${callback.mobile.replace(/[^\d+]/g, '')}`} className="flex min-w-0 items-center gap-2 break-all font-semibold text-emerald-700 hover:text-emerald-800">
-                            <PhoneCall className="h-4 w-4 shrink-0" aria-hidden="true" />{callback.mobile}
-                          </a>
+                          <div className="flex min-w-0 items-center gap-2 break-all">
+                            <a href={`tel:${callback.mobile.replace(/[^\d+]/g, '')}`} aria-label={`Call ${callback.mobile}`} title="Call" className="shrink-0 text-emerald-700 hover:text-emerald-800">
+                              <PhoneCall className="h-4 w-4" aria-hidden="true" />
+                            </a>
+                            {getWhatsAppUrl(callback.mobile) ? (
+                              <a href={getWhatsAppUrl(callback.mobile)!} target="_blank" rel="noopener noreferrer" aria-label={`Chat with ${callback.mobile} on WhatsApp`} onClick={(event) => event.stopPropagation()} className="min-w-0 font-semibold text-emerald-700 hover:text-emerald-800">
+                                {callback.mobile}
+                              </a>
+                            ) : (
+                              <span className="min-w-0 font-semibold text-emerald-700">{callback.mobile}</span>
+                            )}
+                          </div>
                           {callback.email && <a href={`mailto:${callback.email}`} className="min-w-0 break-all text-slate-600 hover:text-orange-700">{callback.email}</a>}
                           <p className="text-slate-700"><span className="font-bold text-slate-500">Program: </span>{callback.program_name}</p>
                           <p><span className="font-bold text-slate-500">Preferred time: </span><span className="font-semibold text-orange-800">{callback.preferred_contact_time}</span></p>
@@ -2731,7 +3037,7 @@ const res = await fetchAdmin(url, {
               </div>
 
               <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1.1fr)_minmax(360px,0.9fr)]">
-                <div className="min-w-0 rounded-2xl border border-slate-200 bg-white p-4 shadow-xs sm:p-5">
+                <div className="order-2 min-w-0 rounded-2xl border border-slate-200 bg-white p-4 shadow-xs sm:p-5 xl:order-1">
                   <div className="mb-4 space-y-3">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div>
@@ -2784,12 +3090,28 @@ const res = await fetchAdmin(url, {
                         <div key={item.id} className="rounded-xl border border-slate-200 bg-white p-3 transition-colors hover:border-orange-200 hover:bg-orange-50/20">
                           <div className="flex items-start gap-3">
                             <div className="h-16 w-20 shrink-0 overflow-hidden rounded-lg border border-slate-200 bg-slate-100">
-                              {(item.cover_image_url || item.media_url || (item.media_type === 'video' && item.youtube_video_id))
-                                ? <img
-                                    src={item.cover_image_url || item.media_url || `https://img.youtube.com/vi/${item.youtube_video_id}/hqdefault.jpg`}
-                                    alt={item.alt_text || item.title}
-                                    className="w-full h-full object-cover"
-                                  />
+                              {(item.cover_image_url || item.media_url || (item.media_type === 'video' && extractYouTubeId(item.youtube_url || item.youtube_video_id)))
+                                ? <button
+                                    type="button"
+                                    onClick={() => {
+                                      setMediaPreviewPlaybackError(null);
+                                      setMediaPreview(item);
+                                    }}
+                                    aria-label={`Preview ${isAudioMediaUrl(item.media_url || '') ? 'audio' : item.media_type}: ${item.title}`}
+                                    className="block h-full w-full cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-orange-600"
+                                  >
+                                  {isAudioMediaUrl(item.media_url || '') && !item.cover_image_url ? (
+                                    <span className="flex h-full w-full items-center justify-center text-slate-500">
+                                      <Music2 className="h-6 w-6" aria-hidden="true" />
+                                    </span>
+                                  ) : (
+                                    <img
+                                      src={item.cover_image_url || item.media_url || `https://img.youtube.com/vi/${extractYouTubeId(item.youtube_url || item.youtube_video_id)}/hqdefault.jpg`}
+                                      alt={item.alt_text || item.title}
+                                      className="h-full w-full object-cover"
+                                    />
+                                  )}
+                                  </button>
                                 : <div className="w-full h-full flex items-center justify-center text-slate-400"><Video className="w-6 h-6" aria-label="No preview available" /></div>}
                             </div>
                             <div className="min-w-0 flex-1">
@@ -2799,7 +3121,10 @@ const res = await fetchAdmin(url, {
                                   {item.is_published ? 'Published' : 'Draft'}
                                 </span>
                               </div>
-                              <p className="mt-1 text-[11px] text-slate-500">{item.media_type === 'video' ? 'Testimonial video' : 'Photo'} · Order {item.display_order || 0}</p>
+                              <p className="mt-1 text-[11px] text-slate-500">{isAudioMediaUrl(item.media_url || '') ? 'Audio' : item.media_type === 'video' ? 'Testimonial video' : 'Photo'} · Order {item.display_order || 0}</p>
+                              <span className="mt-1 inline-flex rounded-full bg-orange-50 px-2 py-0.5 text-[10px] font-semibold text-orange-800">
+                                {item.audience_tag || 'Audience not set'}
+                              </span>
                               <p className="text-[11px] text-slate-600 mt-2 line-clamp-2">{item.caption || 'No caption set.'}</p>
                             </div>
                           </div>
@@ -2808,7 +3133,11 @@ const res = await fetchAdmin(url, {
                             <button
                               disabled={loading}
                               onClick={() => handleToggleMediaPublished(item)}
-                              className="px-2.5 py-1.5 rounded-lg bg-slate-100 text-slate-700 font-semibold text-[11px] cursor-pointer disabled:opacity-50"
+                              className={`admin-publication-action cursor-pointer rounded-lg px-2.5 py-1.5 text-[11px] font-semibold ${
+                                item.is_published
+                                  ? 'admin-publication-action--unpublish'
+                                  : 'admin-publication-action--publish'
+                              }`}
                             >
                               {item.is_published ? 'Unpublish' : 'Publish'}
                             </button>
@@ -2849,7 +3178,7 @@ const res = await fetchAdmin(url, {
                   </div>
                 </div>
 
-                <form onSubmit={handleSaveMedia} className="min-w-0 space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-xs sm:p-5">
+                <form onSubmit={handleSaveMedia} className="order-1 min-w-0 space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-xs sm:p-5 xl:order-2">
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-orange-600">
@@ -2907,6 +3236,24 @@ const res = await fetchAdmin(url, {
                       onChange={(e) => setMediaForm((prev) => ({ ...prev, caption: e.target.value }))}
                       rows={3}
                       className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs"
+                    />
+                  </div>
+
+                  <div>
+                    <label htmlFor="media-audience-tag" className="mb-1 block text-[11px] font-bold text-slate-700">
+                      Audience Tag <span className="text-rose-600">*</span>
+                    </label>
+                    <PremiumDropdown
+                      id="media-audience-tag"
+                      required
+                      value={mediaForm.audience_tag || ''}
+                      onChange={(value) => {
+                        const audience = AUDIENCE_TAGS.find((tag) => tag === value) || null;
+                        setMediaForm((prev) => ({ ...prev, audience_tag: audience }));
+                      }}
+                      className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs"
+                      placeholder="Select an audience"
+                      options={AUDIENCE_TAGS.map((audience) => ({ value: audience, label: audience }))}
                     />
                   </div>
 
@@ -3031,16 +3378,16 @@ const res = await fetchAdmin(url, {
                     Control active scrolling announcements displayed on the public website header.
                   </p>
                 </div>
-                <div className="grid grid-cols-1 xs:grid-cols-2 sm:flex gap-2 w-full sm:w-auto">
-                  <button type="button" onClick={fetchAllData} disabled={loading} className="w-full sm:w-auto px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold disabled:opacity-60">Refresh Announcements</button>
+                <div className="grid grid-cols-2 gap-2 w-full sm:flex sm:w-auto">
+                  <button type="button" onClick={fetchAllData} disabled={loading} className="h-11 w-full min-w-0 rounded-xl border border-slate-200 bg-white px-2 text-center text-[10px] font-semibold leading-tight disabled:opacity-60 sm:h-auto sm:w-auto sm:px-3 sm:py-2 sm:text-xs">Refresh Announcements</button>
                   <button
                     type="button"
                     disabled={loading}
                     onClick={() => setEditingAnnouncement({ content: '', is_active: true })}
-                    className="px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-60"
+                    className="flex h-11 w-full min-w-0 cursor-pointer items-center justify-center gap-1.5 rounded-xl bg-orange-600 px-2 text-[10px] font-bold text-white shadow-xs hover:bg-orange-700 disabled:opacity-60 sm:h-auto sm:w-auto sm:px-4 sm:py-2 sm:text-xs"
                   >
-                    <Plus className="w-4 h-4" />
-                    <span>Add Announcement</span>
+                    <Plus className="h-4 w-4 shrink-0" />
+                    <span className="text-center leading-tight">Add Announcement</span>
                   </button>
                 </div>
               </div>
@@ -3063,7 +3410,11 @@ const res = await fetchAdmin(url, {
                         type="button"
                         disabled={loading}
                         onClick={() => handleToggleAnnouncement(ann)}
-                        className="w-full sm:w-auto px-3 py-2 sm:py-1.5 bg-slate-100 rounded-lg text-slate-700 font-semibold hover:bg-slate-200 cursor-pointer disabled:opacity-50"
+                        className={`admin-publication-action w-full cursor-pointer rounded-lg px-3 py-2 font-semibold sm:w-auto sm:py-1.5 ${
+                          ann.is_active
+                            ? 'admin-publication-action--unpublish'
+                            : 'admin-publication-action--publish'
+                        }`}
                       >
                         {ann.is_active ? 'Unpublish' : 'Publish'}
                       </button>
@@ -3079,7 +3430,7 @@ const res = await fetchAdmin(url, {
                         type="button"
                         disabled={loading}
                         onClick={() => handleDeleteAnnouncement(ann.id)}
-                        className="px-3 py-1.5 bg-rose-50 text-rose-700 rounded-lg font-semibold hover:bg-rose-100 cursor-pointer disabled:opacity-50"
+                        className="col-span-2 w-full cursor-pointer rounded-lg bg-rose-600 px-3 py-3 font-semibold text-white hover:bg-rose-700 disabled:opacity-50 sm:col-span-1 sm:w-auto sm:bg-rose-50 sm:py-1.5 sm:text-rose-700 sm:hover:bg-rose-100"
                       >
                         Delete
                       </button>
@@ -3478,16 +3829,17 @@ const res = await fetchAdmin(url, {
                       <div className="flex flex-col gap-2 border-t border-slate-100 pt-3 sm:flex-row sm:items-center">
                         {adm.id !== currentAdmin.id ? (
                           <>
-                            <select
+                            <PremiumDropdown
                               value={adm.role}
                               aria-label={`Role for ${adm.full_name}`}
-                              onChange={(e) => handleUpdateAdminRole(adm.id, e.target.value as AdminRole, adm.is_active)}
+                              onChange={(value) => handleUpdateAdminRole(adm.id, value as AdminRole, adm.is_active)}
                               className="min-w-0 flex-1 rounded border border-slate-300 bg-slate-50 px-2 py-2 text-xs font-semibold cursor-pointer"
-                            >
-                              <option value="staff">Staff</option>
-                              <option value="admin">Admin</option>
-                              <option value="super_admin">Super Admin</option>
-                            </select>
+                              options={[
+                                { value: 'staff', label: 'Staff' },
+                                { value: 'admin', label: 'Admin' },
+                                { value: 'super_admin', label: 'Super Admin' },
+                              ]}
+                            />
                             <button
                               type="button"
                               onClick={() => handleUpdateAdminRole(adm.id, adm.role, !adm.is_active)}
@@ -3567,15 +3919,17 @@ const res = await fetchAdmin(url, {
                           <td className="px-5 py-4 text-right space-x-2">
                             {adm.id !== currentAdmin.id && (
                               <div className="inline-flex items-center gap-2">
-                                <select
+                                <PremiumDropdown
                                   value={adm.role}
-                                  onChange={(e) => handleUpdateAdminRole(adm.id, e.target.value as AdminRole, adm.is_active)}
+                                  aria-label={`Role for ${adm.full_name}`}
+                                  onChange={(value) => handleUpdateAdminRole(adm.id, value as AdminRole, adm.is_active)}
                                   className="px-2 py-1 bg-slate-50 border border-slate-300 rounded text-xs font-semibold cursor-pointer"
-                                >
-                                  <option value="staff">Staff</option>
-                                  <option value="admin">Admin</option>
-                                  <option value="super_admin">Super Admin</option>
-                                </select>
+                                  options={[
+                                    { value: 'staff', label: 'Staff' },
+                                    { value: 'admin', label: 'Admin' },
+                                    { value: 'super_admin', label: 'Super Admin' },
+                                  ]}
+                                />
                                 <button
                                   onClick={() => handleUpdateAdminRole(adm.id, adm.role, !adm.is_active)}
                                   className={`px-2 py-1 rounded text-xs font-bold cursor-pointer ${
@@ -3635,21 +3989,22 @@ const res = await fetchAdmin(url, {
                 </div>
                 <label className="block max-w-2xl text-xs font-semibold text-slate-700">
                   Application history
-                  <select
+                  <PremiumDropdown
+                    id="official-document-application-history"
                     value={officialPdfApplicationId}
-                    onChange={(event) => {
-                      setOfficialPdfApplicationId(event.target.value);
-                      void loadOfficialDocumentVersions(event.target.value);
+                    onChange={(value) => {
+                      setOfficialPdfApplicationId(value);
+                      void loadOfficialDocumentVersions(value);
                     }}
                     className="mt-1 min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm focus:border-orange-500 focus:outline-none focus:ring-2 focus:ring-orange-100"
-                  >
-                    <option value="">Select an approved application</option>
-                    {applications.filter((application) => application.status === 'Accepted' && application.student_id).map((application) => (
-                      <option key={application.id} value={application.id}>
-                        {application.student_name} ? {application.application_reference} ? {application.program_name}
-                      </option>
-                    ))}
-                  </select>
+                    placeholder="Select an approved application"
+                    options={applications
+                      .filter((application) => application.status === 'Accepted' && application.student_id)
+                      .map((application) => ({
+                        value: application.id,
+                        label: `${application.student_name} ? ${application.application_reference} ? ${application.program_name}`,
+                      }))}
+                  />
                 </label>
                 {(() => {
                   const application = applications.find((item) => item.id === officialPdfApplicationId && item.status === 'Accepted' && item.student_id);
@@ -3731,9 +4086,12 @@ const res = await fetchAdmin(url, {
                   </div>
                   <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                     <label className="text-xs font-semibold text-slate-700">Font family
-                      <select value={officialDocumentSettings.typography.fontFamily} onChange={(event) => setOfficialDocumentSettings((current) => ({ ...current, typography: { ...current.typography, fontFamily: event.target.value as OfficialDocumentSettings['typography']['fontFamily'] } }))} className="mt-1 min-h-10 w-full rounded-lg border border-slate-200 px-2">
-                        {(['Helvetica', 'TimesRoman', 'Courier'] as const).map((font) => <option key={font} value={font}>{font}</option>)}
-                      </select>
+                      <PremiumDropdown
+                        value={officialDocumentSettings.typography.fontFamily}
+                        onChange={(value) => setOfficialDocumentSettings((current) => ({ ...current, typography: { ...current.typography, fontFamily: value as OfficialDocumentSettings['typography']['fontFamily'] } }))}
+                        className="mt-1 min-h-10 w-full rounded-lg px-2"
+                        options={(['Helvetica', 'TimesRoman', 'Courier'] as const).map((font) => ({ value: font, label: font }))}
+                      />
                     </label>
                     {([
                       ['titleSize', 'Title size', 12, 24],
@@ -3777,7 +4135,15 @@ const res = await fetchAdmin(url, {
                   <h2 className="font-bold text-[#0B1F4D]">Layout configuration</h2>
                   <div className="grid gap-3 sm:grid-cols-3">
                     <label className="text-xs font-semibold text-slate-700">Page size
-                      <select value={officialDocumentSettings.layout.pageSize} onChange={(event) => setOfficialDocumentSettings((current) => ({ ...current, layout: { ...current.layout, pageSize: event.target.value as OfficialDocumentSettings['layout']['pageSize'] } }))} className="mt-1 min-h-10 w-full rounded-lg border border-slate-200 px-2"><option value="A4">A4</option><option value="Letter">Letter</option></select>
+                      <PremiumDropdown
+                        value={officialDocumentSettings.layout.pageSize}
+                        onChange={(value) => setOfficialDocumentSettings((current) => ({ ...current, layout: { ...current.layout, pageSize: value as OfficialDocumentSettings['layout']['pageSize'] } }))}
+                        className="mt-1 min-h-10 w-full rounded-lg px-2"
+                        options={[
+                          { value: 'A4', label: 'A4' },
+                          { value: 'Letter', label: 'Letter' },
+                        ]}
+                      />
                     </label>
                     <label className="text-xs font-semibold text-slate-700">Spacing
                       <input type="number" min="0.75" max="1.75" step="0.05" value={officialDocumentSettings.layout.spacing} onChange={(event) => setOfficialDocumentSettings((current) => ({ ...current, layout: { ...current.layout, spacing: Number(event.target.value) } }))} className="mt-1 min-h-10 w-full rounded-lg border border-slate-200 px-3" />
@@ -3802,6 +4168,101 @@ const res = await fetchAdmin(url, {
           )}
         </main>
       </div>
+
+      {mediaPreview && (
+        <div
+          className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-sm"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) setMediaPreview(null);
+          }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="media-preview-title"
+            className="media-preview-dialog max-h-[calc(100dvh-2rem)] w-full max-w-[600px] overflow-hidden rounded-2xl border border-white/20 bg-white shadow-2xl sm:max-h-[450px]"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <header className="flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
+              <h2 id="media-preview-title" className="min-w-0 truncate text-sm font-bold text-slate-900">
+                {mediaPreview.title}
+              </h2>
+              <button
+                type="button"
+                aria-label="Close media preview"
+                onClick={() => setMediaPreview(null)}
+                className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-slate-100 text-slate-700 transition-colors hover:bg-slate-200 hover:text-slate-950 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </header>
+            <div className="relative flex max-h-[calc(100dvh-6rem)] items-center justify-center bg-slate-950 p-3 sm:max-h-[390px]">
+              {mediaPreviewAudioUrl ? (
+                <>
+                  <audio
+                    src={mediaPreviewAudioUrl}
+                    controls
+                    preload="metadata"
+                    onClick={(event) => event.stopPropagation()}
+                    onCanPlay={() => setMediaPreviewPlaybackError(null)}
+                    onError={() => setMediaPreviewPlaybackError('This audio could not be played. Its source may be unavailable or use an unsupported format.')}
+                    className="w-full max-w-[360px]"
+                  >
+                    Your browser does not support audio playback.
+                  </audio>
+                  {mediaPreviewPlaybackError && (
+                    <p role="alert" className="absolute bottom-4 left-4 right-4 rounded-lg bg-rose-700/95 p-3 text-center text-xs text-white">
+                      {mediaPreviewPlaybackError}
+                    </p>
+                  )}
+                </>
+              ) : mediaPreview.media_type === 'photo' ? (
+                <img
+                  src={mediaPreview.media_url || mediaPreview.cover_image_url || ''}
+                  alt={mediaPreview.alt_text || mediaPreview.title}
+                  className="max-h-[calc(100dvh-8rem)] max-w-full object-contain sm:max-h-[360px]"
+                />
+              ) : mediaPreviewVideoUrl ? (
+                <>
+                  <video
+                    src={mediaPreviewVideoUrl}
+                    controls
+                    playsInline
+                    preload="metadata"
+                    onClick={(event) => event.stopPropagation()}
+                    onCanPlay={() => setMediaPreviewPlaybackError(null)}
+                    onError={() => setMediaPreviewPlaybackError('This video could not be played. Its source may be unavailable or use an unsupported format.')}
+                    className="max-h-[calc(100dvh-8rem)] max-w-full sm:max-h-[360px]"
+                  >
+                    Your browser does not support video playback.
+                  </video>
+                  {mediaPreviewPlaybackError && (
+                    <p role="alert" className="absolute bottom-4 left-4 right-4 rounded-lg bg-rose-700/95 p-3 text-center text-xs text-white">
+                      {mediaPreviewPlaybackError}
+                    </p>
+                  )}
+                </>
+              ) : mediaPreviewVideoId ? (
+                <div className="aspect-video w-full max-w-full overflow-hidden rounded-lg">
+                  <iframe
+                    src={`https://www.youtube-nocookie.com/embed/${mediaPreviewVideoId}?controls=1&rel=0&playsinline=1`}
+                    title={mediaPreview.title}
+                    className="h-full w-full border-0"
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                    referrerPolicy="strict-origin-when-cross-origin"
+                    onError={() => setMediaPreviewPlaybackError('This video preview could not be loaded. Please check the source URL and try again.')}
+                    allowFullScreen
+                  />
+                </div>
+              ) : (
+                <p role="alert" className="p-8 text-center text-sm text-white">
+                  {mediaPreviewPlaybackError || 'This media preview is unavailable or uses an unsupported format.'}
+                </p>
+              )}
+            </div>
+          </section>
+        </div>
+      )}
 
       {officialPdfPreviewUrl && (
         <div
@@ -3869,11 +4330,17 @@ const res = await fetchAdmin(url, {
               <div><dt className="text-slate-500">Received</dt><dd className="font-semibold text-slate-900">{new Date(selectedCallback.created_at).toLocaleString('en-IN')}</dd></div>
             </dl>
             <p className="p-3 bg-slate-50 rounded-xl text-xs text-slate-700 whitespace-pre-wrap">{selectedCallback.message || 'No message provided.'}</p>
-            <label className="block text-xs font-semibold text-slate-700">Status
-              <select value={selectedCallback.status} disabled={loading} onChange={(event) => handleCallbackStatusChange(selectedCallback, event.target.value as CallbackRequest['status'])} className="ml-2 px-3 py-2 border border-slate-200 rounded-lg">
-                {(['Pending', 'Contacted', 'Completed'] as const).map((status) => <option key={status} value={status}>{status}</option>)}
-              </select>
-            </label>
+            <div className="block text-xs font-semibold text-slate-700">
+              <span>Status</span>
+              <PremiumDropdown
+                aria-label={`Status for ${selectedCallback.full_name}`}
+                value={selectedCallback.status}
+                disabled={loading}
+                onChange={(value) => handleCallbackStatusChange(selectedCallback, value as CallbackRequest['status'])}
+                className="ml-2 px-3 py-2"
+                options={(['Pending', 'Contacted', 'Completed'] as const).map((status) => ({ value: status, label: status }))}
+              />
+            </div>
           </section>
         </div>
       )}
@@ -3881,7 +4348,7 @@ const res = await fetchAdmin(url, {
       {/* Application Review Details Modal */}
       {selectedApp && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs animate-in fade-in">
-          <div className="bg-white rounded-3xl max-w-2xl w-full p-6 sm:p-8 space-y-6 shadow-2xl border border-slate-200 max-h-[90vh] overflow-y-auto">
+          <div className="application-review-dialog bg-white rounded-3xl max-w-2xl w-full p-6 sm:p-8 space-y-6 shadow-2xl border border-slate-200 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-100 pb-4">
               <div>
                 <span className="text-[11px] font-bold uppercase tracking-wider text-orange-600">
@@ -3892,7 +4359,7 @@ const res = await fetchAdmin(url, {
                 </h3>
               </div>
               <button
-                onClick={() => setSelectedApp(null)}
+                onClick={closeApplicationReview}
                 className="p-1 text-slate-400 hover:text-slate-600 rounded-lg"
               >
                 <X className="w-5 h-5" />
@@ -4016,37 +4483,108 @@ const res = await fetchAdmin(url, {
                   <p className="text-[11px] text-slate-600 mt-1">Complete all four fields before approving this application. These details will be included in the approval request for the official PDF.</p>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                  <label className="block font-semibold text-slate-700">Joining Date
-                    <input type="date" required value={applicationJoiningInfo.joiningDate === 'To be confirmed' ? '' : applicationJoiningInfo.joiningDate} onChange={(event) => setApplicationJoiningInfo((prev) => ({ ...prev, joiningDate: event.target.value }))} aria-label="Choose joining date" className="mt-1 w-full px-3 py-2 border border-slate-300 rounded-lg bg-white text-slate-900 cursor-pointer" />
+                  <label htmlFor="application-joining-date" className="block font-semibold text-slate-700">
+                    Joining Date
+                    <input
+                      id="application-joining-date"
+                      type="date"
+                      required
+                      value={applicationJoiningInfo.joiningDate}
+                      onChange={(event) => updateJoiningInformationField('joiningDate', event.target.value)}
+                      aria-invalid={Boolean(getJoiningInformationErrors(applicationJoiningInfo).joiningDate)}
+                      aria-describedby="application-joining-date-error"
+                      className="mt-1 min-h-11 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900"
+                    />
+                    {getJoiningInformationErrors(applicationJoiningInfo).joiningDate && (
+                      <span id="application-joining-date-error" className="mt-1 block font-medium text-rose-700">
+                        {getJoiningInformationErrors(applicationJoiningInfo).joiningDate}
+                      </span>
+                    )}
                   </label>
-                  <label className="block font-semibold text-slate-700">Class Schedule
-                    <input required value={applicationJoiningInfo.classSchedule} onChange={(event) => setApplicationJoiningInfo((prev) => ({ ...prev, classSchedule: event.target.value }))} placeholder="e.g. Monday to Saturday" className="mt-1 w-full px-3 py-2 border border-slate-300 rounded-lg bg-white" />
+                  <label htmlFor="application-class-schedule" className="block font-semibold text-slate-700">
+                    Class Schedule
+                    <select
+                      id="application-class-schedule"
+                      required
+                      value={applicationJoiningInfo.classSchedule}
+                      onChange={(event) => updateJoiningInformationField('classSchedule', event.target.value)}
+                      aria-invalid={Boolean(getJoiningInformationErrors(applicationJoiningInfo).classSchedule)}
+                      aria-describedby="application-class-schedule-error"
+                      className="mt-1 min-h-11 w-full rounded-lg border border-slate-300 bg-white px-3 py-2"
+                    >
+                      <option value="">Select class schedule</option>
+                      {JOINING_CLASS_SCHEDULES.map((schedule) => (
+                        <option key={schedule} value={schedule}>{schedule}</option>
+                      ))}
+                    </select>
+                    {getJoiningInformationErrors(applicationJoiningInfo).classSchedule && (
+                      <span id="application-class-schedule-error" className="mt-1 block font-medium text-rose-700">
+                        {getJoiningInformationErrors(applicationJoiningInfo).classSchedule}
+                      </span>
+                    )}
                   </label>
-                  <label className="block font-semibold text-slate-700">Class Timings
-                    <input required value={applicationJoiningInfo.classTimings} onChange={(event) => setApplicationJoiningInfo((prev) => ({ ...prev, classTimings: event.target.value }))} placeholder="e.g. 7:00 AM to 8:00 AM" className="mt-1 w-full px-3 py-2 border border-slate-300 rounded-lg bg-white" />
+                  <label htmlFor="application-class-timings" className="block font-semibold text-slate-700">
+                    Class Timings
+                    <select
+                      id="application-class-timings"
+                      required
+                      value={applicationJoiningInfo.classTimings}
+                      onChange={(event) => updateJoiningInformationField('classTimings', event.target.value)}
+                      aria-invalid={Boolean(getJoiningInformationErrors(applicationJoiningInfo).classTimings)}
+                      aria-describedby="application-class-timings-error"
+                      className="mt-1 min-h-11 w-full rounded-lg border border-slate-300 bg-white px-3 py-2"
+                    >
+                      <option value="">Select class timing</option>
+                      {JOINING_CLASS_TIMINGS.map((timing) => (
+                        <option key={timing} value={timing}>{timing}</option>
+                      ))}
+                    </select>
+                    {getJoiningInformationErrors(applicationJoiningInfo).classTimings && (
+                      <span id="application-class-timings-error" className="mt-1 block font-medium text-rose-700">
+                        {getJoiningInformationErrors(applicationJoiningInfo).classTimings}
+                      </span>
+                    )}
                   </label>
-                  <label className="block font-semibold text-slate-700">Venue
-                    <input required value={applicationJoiningInfo.venue} onChange={(event) => setApplicationJoiningInfo((prev) => ({ ...prev, venue: event.target.value }))} placeholder="Academy address or online" className="mt-1 w-full px-3 py-2 border border-slate-300 rounded-lg bg-white" />
+                  <label htmlFor="application-joining-venue" className="block font-semibold text-slate-700">
+                    Venue
+                    <input
+                      id="application-joining-venue"
+                      required
+                      value={applicationJoiningInfo.venue}
+                      onChange={(event) => updateJoiningInformationField('venue', event.target.value)}
+                      aria-invalid={Boolean(getJoiningInformationErrors(applicationJoiningInfo).venue)}
+                      aria-describedby="application-joining-venue-error"
+                      className="mt-1 min-h-11 w-full rounded-lg border border-slate-300 bg-white px-3 py-2"
+                    />
+                    {getJoiningInformationErrors(applicationJoiningInfo).venue && (
+                      <span id="application-joining-venue-error" className="mt-1 block font-medium text-rose-700">
+                        {getJoiningInformationErrors(applicationJoiningInfo).venue}
+                      </span>
+                    )}
                   </label>
                 </div>
-                {(['joiningDate', 'classSchedule', 'classTimings', 'venue'] as const).some((key) => !applicationJoiningInfo[key].trim() || applicationJoiningInfo[key].trim().toLowerCase() === 'to be confirmed') && (
-                  <p className="text-[11px] font-semibold text-rose-700">Approval stays disabled until all fields contain final details (not “To be confirmed”).</p>
-                )}
+                <p aria-live="polite" className={`text-[11px] font-semibold ${
+                  joiningInformationSaveStatus === 'error' ? 'text-rose-700' : 'text-slate-600'
+                }`}>
+                  {joiningInformationSaveStatus === 'saving' && 'Saving joining information…'}
+                  {joiningInformationSaveStatus === 'saved' && 'Joining information saved.'}
+                  {joiningInformationSaveStatus === 'error' && 'Joining information could not be saved. Correct the issue and try again.'}
+                </p>
               </section>
             )}
 
-            <div className="pt-4 border-t border-slate-100 flex items-center justify-between">
+            <div className="pt-4 border-t border-slate-100 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <span className="text-xs font-semibold text-slate-500">
                 Current Status: <strong className="text-slate-900">{selectedApp.status}</strong>
               </span>
 
-              <div className="flex items-center gap-2">
+              <div className="flex w-full flex-col items-stretch gap-2 sm:w-auto sm:flex-row sm:items-center">
                 {selectedApp.status === 'Pending' && (
                   <button
                     type="button"
-                    disabled={loading || (['joiningDate', 'classSchedule', 'classTimings', 'venue'] as const).some((key) => !applicationJoiningInfo[key].trim() || applicationJoiningInfo[key].trim().toLowerCase() === 'to be confirmed')}
+                    disabled={loading || !isValidJoiningInformation(applicationJoiningInfo)}
                     onClick={() => handleApproveApp(selectedApp.id)}
-                    className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-md cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
+                    className="flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-xl bg-emerald-600 px-4 py-3 text-center text-xs font-bold text-white shadow-md hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto sm:px-6 sm:py-2.5"
                   >
                     <CheckCircle className="w-4 h-4" />
                     <span>Confirm Approval & Send Official PDF</span>
@@ -4097,7 +4635,7 @@ const res = await fetchAdmin(url, {
             aria-modal="true"
             aria-labelledby="delete-application-title"
             aria-describedby="delete-application-warning"
-            className="w-full max-w-lg space-y-5 rounded-2xl border border-rose-200 bg-white p-5 shadow-2xl sm:p-6"
+            className="application-delete-dialog w-full max-w-lg space-y-5 rounded-2xl border border-rose-200 bg-white p-5 shadow-2xl sm:p-6"
           >
             <div>
               <h2 id="delete-application-title" className="text-lg font-bold text-slate-950">
@@ -4360,21 +4898,22 @@ const res = await fetchAdmin(url, {
                 <label htmlFor="ann-button-action" className="font-bold text-slate-700 block mb-1">
                   Optional Banner Button
                 </label>
-                <select
+                <PremiumDropdown
                   id="ann-button-action"
                   value={editingAnnouncement.button_action ?? ''}
-                  onChange={(e) => setEditingAnnouncement({
+                  onChange={(value) => setEditingAnnouncement({
                     ...editingAnnouncement,
-                    button_action: e.target.value === 'application' || e.target.value === 'demo'
-                      ? e.target.value
+                    button_action: value === 'application' || value === 'demo'
+                      ? value
                       : null,
                   })}
                   className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2"
-                >
-                  <option value="">No button</option>
-                  <option value="application">Application Form</option>
-                  <option value="demo">Book Your Free Demo</option>
-                </select>
+                  placeholder="No button"
+                  options={[
+                    { value: 'application', label: 'Application Form' },
+                    { value: 'demo', label: 'Book Your Free Demo' },
+                  ]}
+                />
                 <p className="mt-1 text-[11px] text-slate-500">
                   Add an optional call-to-action button to this moving announcement.
                 </p>

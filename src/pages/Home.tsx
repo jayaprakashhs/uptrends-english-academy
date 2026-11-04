@@ -226,9 +226,9 @@ export const Home: React.FC<HomeProps> = ({
         <div aria-hidden="true" className="pointer-events-none absolute -left-20 bottom-[-8rem] h-64 w-64 rounded-full border-[2.5rem] border-orange-100/70 sm:h-80 sm:w-80" />
         <div aria-hidden="true" className="pointer-events-none absolute right-[39%] top-12 hidden h-10 w-10 rotate-45 border border-amber-200 sm:block" />
         <div className="relative mx-auto max-w-[1360px] px-4 sm:px-6 lg:px-8">
-          <div className="grid min-w-0 grid-cols-1 items-center gap-8 max-[639px]:gap-3 min-[1100px]:h-[calc(100svh-164px)] min-[1100px]:mb-0 min-[1100px]:pb-0 min-[1100px]:grid-cols-[minmax(0,1.16fr)_minmax(0,0.84fr)] min-[1100px]:items-stretch min-[1100px]:gap-4">
+          <div className="grid min-w-0 grid-cols-1 items-center gap-8 max-[639px]:gap-0 min-[1100px]:h-[calc(100svh-164px)] min-[1100px]:mb-0 min-[1100px]:pb-0 min-[1100px]:grid-cols-[minmax(0,1.16fr)_minmax(0,0.84fr)] min-[1100px]:items-stretch min-[1100px]:gap-4">
             <div className="relative z-10 flex min-w-0 flex-col justify-center gap-4 py-2 max-[639px]:order-2 max-[639px]:gap-2 max-[639px]:py-0 min-[1100px]:py-5">
-              <div className="inline-flex items-center gap-2 rounded-full bg-transparent px-0 py-1 text-[11px] font-bold uppercase tracking-[0.16em] text-orange-700 max-[639px]:mx-auto max-[639px]:justify-center max-[639px]:text-center sm:text-xs">
+              <div className="inline-flex items-center gap-2 rounded-full bg-transparent px-0 py-1 text-[11px] font-bold uppercase tracking-[0.16em] text-orange-700 max-[639px]:mx-auto max-[639px]:pt-0 max-[639px]:justify-center max-[639px]:text-center sm:text-xs">
                 <Sparkles className="h-4 w-4 text-orange-600" />
                 <span>WELCOME TO UPTREND'S ENGLISH ACADEMY</span>
               </div>

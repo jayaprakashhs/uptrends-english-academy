@@ -533,35 +533,35 @@ export const AboutUsManagement: React.FC<{ currentAdmin: AdminProfile }> = ({ cu
   }
 
   return (
-    <div className="space-y-6">
+    <div className="min-w-0 w-full space-y-4 sm:space-y-6">
       <header>
-        <h1 className="text-2xl font-extrabold tracking-tight text-[#0B1F4D]">About Us Management</h1>
-        <p className="mt-1 text-sm text-slate-600">Manage instructor profiles and the public video introduction.</p>
+        <h1 className="break-words [overflow-wrap:anywhere] text-xl font-extrabold leading-tight tracking-tight text-[#0B1F4D] sm:text-2xl">About Us Management</h1>
+        <p className="mt-1 text-xs leading-relaxed text-slate-600 sm:text-sm">Manage instructor profiles and the public video introduction.</p>
       </header>
 
       {loadError && (
-        <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
+        <div role="alert" className="break-words [overflow-wrap:anywhere] rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800 sm:p-4 sm:text-sm">
           {loadError}
         </div>
       )}
       {loading && (
-        <p role="status" className="flex items-center gap-2 text-sm text-slate-600">
+        <p role="status" className="flex min-w-0 items-center gap-2 text-xs text-slate-600 sm:text-sm">
           <LoaderCircle className="h-4 w-4 animate-spin" /> Loading About Us content…
         </p>
       )}
 
-      <div className="space-y-6">
-        <section className="overflow-hidden rounded-2xl border border-sky-100 bg-white shadow-sm">
-          <div className="px-5 pb-5 pt-6 sm:px-7">
-            <div className="flex items-center gap-4">
-              <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-orange-50 text-orange-600">
-                <UsersRound className="h-7 w-7" />
+      <div className="min-w-0 space-y-4 sm:space-y-6">
+        <section className="min-w-0 overflow-hidden rounded-xl border border-sky-100 bg-white shadow-sm sm:rounded-2xl">
+          <div className="px-3 pb-3 pt-4 sm:px-7 sm:pb-5 sm:pt-6">
+            <div className="flex min-w-0 items-center gap-3 sm:gap-4">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-orange-50 text-orange-600 sm:h-12 sm:w-12">
+                <UsersRound className="h-6 w-6 sm:h-7 sm:w-7" />
               </span>
-              <div>
-                <h2 className="text-2xl font-bold tracking-tight text-[#0B1F4D] sm:text-3xl">
+              <div className="min-w-0">
+                <h2 className="break-words [overflow-wrap:anywhere] text-xl font-bold leading-tight tracking-tight text-[#0B1F4D] sm:text-3xl">
                   {instructorDraft.id ? 'Edit Instructor' : 'Add Instructor'}
                 </h2>
-                <p className="mt-1 text-sm text-slate-500">
+                <p className="mt-1 text-xs leading-relaxed text-slate-500 sm:text-sm">
                   {instructorDraft.id
                     ? 'Update this instructor profile for the About Us section'
                     : 'Create a new instructor profile for the About Us section'}
@@ -572,7 +572,7 @@ export const AboutUsManagement: React.FC<{ currentAdmin: AdminProfile }> = ({ cu
           </div>
 
           {instructorMessage && (
-            <p role={instructorMessage.type === 'error' ? 'alert' : 'status'} className={`mx-5 mb-4 rounded-lg p-3 text-xs sm:mx-7 ${
+            <p role={instructorMessage.type === 'error' ? 'alert' : 'status'} className={`mx-3 mb-3 break-words [overflow-wrap:anywhere] rounded-lg p-3 text-xs sm:mx-7 sm:mb-4 ${
               instructorMessage.type === 'success' ? 'bg-emerald-50 text-emerald-800' :
                 instructorMessage.type === 'warning' ? 'bg-amber-50 text-amber-800' : 'bg-rose-50 text-rose-800'
             }`}>
@@ -580,18 +580,18 @@ export const AboutUsManagement: React.FC<{ currentAdmin: AdminProfile }> = ({ cu
             </p>
           )}
 
-          <div className="grid items-stretch gap-5 px-5 pb-6 sm:px-7 lg:grid-cols-[minmax(0,1.62fr)_minmax(18rem,1fr)]">
-            <form onSubmit={saveInstructor} className="min-w-0 space-y-5 rounded-xl border border-sky-100 bg-white p-4 sm:p-6">
-              <h3 className="text-lg font-bold text-[#0B1F4D]">Instructor Details</h3>
+          <div className="grid min-w-0 items-stretch gap-3 px-3 pb-4 sm:gap-5 sm:px-7 sm:pb-6 lg:grid-cols-[minmax(0,1.62fr)_minmax(18rem,1fr)]">
+            <form onSubmit={saveInstructor} className="min-w-0 space-y-4 rounded-xl border border-sky-100 bg-white p-3 sm:space-y-5 sm:p-6">
+              <h3 className="text-base font-bold text-[#0B1F4D] sm:text-lg">Instructor Details</h3>
 
-              <div className="grid gap-4 sm:grid-cols-2">
+              <div className="grid min-w-0 gap-3 sm:gap-4 sm:grid-cols-2">
                 <label className="block space-y-1.5 text-sm font-semibold text-slate-700">
                   Instructor Name
                   <input
                     required
                     value={instructorDraft.full_name}
                     onChange={(event) => setInstructorDraft({ ...instructorDraft, full_name: event.target.value })}
-                    className="w-full rounded-lg border border-sky-100 bg-white px-3.5 py-3 text-sm font-normal outline-none transition focus:border-orange-400 focus:ring-2 focus:ring-orange-100"
+                    className="min-w-0 w-full rounded-lg border border-sky-100 bg-white px-3 py-3 text-sm font-normal outline-none transition focus:border-orange-400 focus:ring-2 focus:ring-orange-100 sm:px-3.5"
                     placeholder="Enter instructor name"
                   />
                 </label>
@@ -601,7 +601,7 @@ export const AboutUsManagement: React.FC<{ currentAdmin: AdminProfile }> = ({ cu
                     required
                     value={instructorDraft.designation}
                     onChange={(event) => setInstructorDraft({ ...instructorDraft, designation: event.target.value })}
-                    className="w-full rounded-lg border border-sky-100 bg-white px-3.5 py-3 text-sm font-normal outline-none transition focus:border-orange-400 focus:ring-2 focus:ring-orange-100"
+                    className="min-w-0 w-full rounded-lg border border-sky-100 bg-white px-3 py-3 text-sm font-normal outline-none transition focus:border-orange-400 focus:ring-2 focus:ring-orange-100 sm:px-3.5"
                     placeholder="e.g. Spoken English Trainer"
                   />
                 </label>
@@ -612,7 +612,7 @@ export const AboutUsManagement: React.FC<{ currentAdmin: AdminProfile }> = ({ cu
                 <input
                   value={instructorDraft.qualifications}
                   onChange={(event) => setInstructorDraft({ ...instructorDraft, qualifications: event.target.value })}
-                  className="w-full rounded-lg border border-sky-100 bg-white px-3.5 py-3 text-sm font-normal outline-none transition focus:border-orange-400 focus:ring-2 focus:ring-orange-100"
+                  className="min-w-0 w-full rounded-lg border border-sky-100 bg-white px-3 py-3 text-sm font-normal outline-none transition focus:border-orange-400 focus:ring-2 focus:ring-orange-100 sm:px-3.5"
                   placeholder="Enter qualifications"
                 />
               </label>
@@ -625,7 +625,7 @@ export const AboutUsManagement: React.FC<{ currentAdmin: AdminProfile }> = ({ cu
                   maxLength={1000}
                   value={instructorDraft.bio}
                   onChange={(event) => setInstructorDraft({ ...instructorDraft, bio: event.target.value })}
-                  className="w-full resize-y rounded-lg border border-sky-100 bg-white px-3.5 py-3 text-sm font-normal leading-relaxed outline-none transition focus:border-orange-400 focus:ring-2 focus:ring-orange-100"
+                  className="min-w-0 w-full resize-y rounded-lg border border-sky-100 bg-white px-3 py-3 text-sm font-normal leading-relaxed outline-none transition focus:border-orange-400 focus:ring-2 focus:ring-orange-100 sm:px-3.5"
                   placeholder="Write a short biography about the instructor..."
                 />
                 <span className="block text-right text-xs font-normal text-slate-400">{instructorDraft.bio.length} / 1000</span>
@@ -633,9 +633,9 @@ export const AboutUsManagement: React.FC<{ currentAdmin: AdminProfile }> = ({ cu
 
               <div>
                 <h4 className="mb-2 text-sm font-semibold text-slate-700">Profile Photo</h4>
-                <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(10rem,0.8fr)]">
-                  <div className="flex min-h-32 flex-col items-center justify-center rounded-lg border border-dashed border-sky-200 bg-slate-50/50 p-4 text-center">
-                    <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-sky-100 bg-white px-4 py-2.5 text-sm font-semibold text-[#0B1F4D] transition hover:border-orange-300 hover:bg-orange-50">
+                <div className="grid min-w-0 gap-2 sm:gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(10rem,0.8fr)]">
+                  <div className="flex min-h-32 min-w-0 flex-col items-center justify-center rounded-lg border border-dashed border-sky-200 bg-slate-50/50 p-3 text-center sm:p-4">
+                    <label className="inline-flex min-h-11 max-w-full cursor-pointer items-center justify-center gap-2 rounded-lg border border-sky-100 bg-white px-3 py-2.5 text-center text-xs font-semibold text-[#0B1F4D] transition hover:border-orange-300 hover:bg-orange-50 sm:px-4 sm:text-sm">
                       <ImagePlus className="h-4 w-4 text-orange-600" />
                       {selectedPhoto ? 'Change Photo' : 'Upload Photo'}
                       <input
@@ -668,7 +668,7 @@ export const AboutUsManagement: React.FC<{ currentAdmin: AdminProfile }> = ({ cu
                       </button>
                     )}
                   </div>
-                  <div className="rounded-lg border border-sky-100 bg-[#F8FBFF] p-4">
+                  <div className="min-w-0 rounded-lg border border-sky-100 bg-[#F8FBFF] p-3 sm:p-4">
                     <h5 className="text-sm font-bold text-[#0B1F4D]">Recommended Photo</h5>
                     <p className="mt-2 text-xs leading-relaxed text-slate-500">
                       Use a clear, professional headshot. Square images work best for the instructor profile.
@@ -678,7 +678,7 @@ export const AboutUsManagement: React.FC<{ currentAdmin: AdminProfile }> = ({ cu
                 </div>
               </div>
 
-              <div className="grid gap-4 sm:grid-cols-2">
+              <div className="grid gap-3 sm:gap-4 sm:grid-cols-2">
                 <label className="block space-y-1.5 text-sm font-semibold text-slate-700">
                   Display Order
                   <input
@@ -686,7 +686,7 @@ export const AboutUsManagement: React.FC<{ currentAdmin: AdminProfile }> = ({ cu
                     step="1"
                     value={instructorDraft.display_order}
                     onChange={(event) => setInstructorDraft({ ...instructorDraft, display_order: Number(event.target.value) })}
-                    className="w-full rounded-lg border border-sky-100 bg-white px-3 py-2.5 text-sm font-normal outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100"
+                    className="min-w-0 w-full rounded-lg border border-sky-100 bg-white px-3 py-2.5 text-sm font-normal outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100"
                   />
                 </label>
                 <label className="flex items-center gap-2 self-end pb-3 text-sm font-medium text-slate-700">
@@ -700,23 +700,23 @@ export const AboutUsManagement: React.FC<{ currentAdmin: AdminProfile }> = ({ cu
                 </label>
               </div>
 
-              <div className="flex flex-wrap gap-3 border-t border-sky-50 pt-4">
-                <button type="submit" disabled={savingInstructor} className="inline-flex min-w-40 items-center justify-center gap-2 rounded-lg bg-orange-600 px-5 py-3 text-sm font-bold text-white transition hover:bg-orange-700 disabled:opacity-60">
+              <div className="flex flex-col gap-2 border-t border-sky-50 pt-4 sm:flex-row sm:gap-3">
+                <button type="submit" disabled={savingInstructor} className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-orange-600 px-5 py-3 text-sm font-bold text-white transition hover:bg-orange-700 disabled:opacity-60 sm:w-auto sm:min-w-40">
                   {savingInstructor ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
                   {instructorDraft.id ? 'Save Changes' : 'Add Instructor'}
                 </button>
-                <button type="button" onClick={resetInstructorEditor} className="inline-flex items-center justify-center gap-2 rounded-lg border border-sky-200 bg-white px-5 py-3 text-sm font-semibold text-[#0B1F4D] transition hover:bg-slate-50">
+                <button type="button" onClick={resetInstructorEditor} className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg border border-sky-200 bg-white px-5 py-3 text-sm font-semibold text-[#0B1F4D] transition hover:bg-slate-50 sm:w-auto">
                   <RotateCcw className="h-4 w-4" /> Reset
                 </button>
               </div>
             </form>
 
-            <aside className="flex min-w-0 flex-col overflow-hidden rounded-xl border border-sky-100 bg-white">
-              <div className="flex items-center gap-2 bg-[#0B1F4D] px-5 py-4 text-white">
+            <aside className="flex w-full min-w-0 max-w-full flex-col overflow-hidden rounded-xl border border-sky-100 bg-white">
+              <div className="flex items-center gap-2 bg-[#0B1F4D] px-3 py-3 text-white sm:px-5 sm:py-4">
                 <Eye className="h-5 w-5" />
                 <h3 className="text-base font-bold">Preview</h3>
               </div>
-              <div className="relative mx-5 mb-5 mt-16 flex min-h-[28rem] flex-1 flex-col items-center rounded-xl border border-sky-100 px-5 pb-8 pt-16 text-center sm:mx-7 sm:px-8">
+              <div className="relative mx-3 mb-4 mt-12 flex min-h-[20rem] min-w-0 flex-1 flex-col items-center rounded-xl border border-sky-100 px-3 pb-5 pt-14 text-center sm:mx-7 sm:mb-5 sm:mt-16 sm:min-h-[28rem] sm:px-8 sm:pb-8 sm:pt-16">
                 {(photoPreview || (!removePhoto && instructorDraft.photo_display_url)) ? (
                   <img
                     src={photoPreview || instructorDraft.photo_display_url || ''}
@@ -728,53 +728,61 @@ export const AboutUsManagement: React.FC<{ currentAdmin: AdminProfile }> = ({ cu
                     <UserRound className="h-14 w-14" />
                   </div>
                 )}
-                <h4 className="mt-5 break-words text-2xl font-bold leading-tight text-[#0B1F4D]">
+                <h4 className="mt-5 max-w-full break-words [overflow-wrap:anywhere] text-xl font-bold leading-tight text-[#0B1F4D] sm:text-2xl">
                   {instructorDraft.full_name.trim() || 'Instructor Name'}
                 </h4>
-                <p className="mt-2 break-words text-base font-semibold text-orange-600">
+                <p className="mt-2 max-w-full break-words [overflow-wrap:anywhere] text-sm font-semibold text-orange-600 sm:text-base">
                   {instructorDraft.designation.trim() || 'Designation'}
                 </p>
                 <div className="my-5 h-0.5 w-16 bg-orange-500" />
-                <p className="min-h-5 break-words text-sm italic text-slate-500">
+                <p className="min-h-5 break-words [overflow-wrap:anywhere] text-sm italic text-slate-500">
                   {instructorDraft.qualifications.trim() || 'Qualifications'}
                 </p>
-                <p className="mt-6 w-full whitespace-pre-wrap break-words text-sm leading-relaxed text-slate-600">
+                <p className="mt-6 w-full whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-sm leading-relaxed text-slate-600">
                   {instructorDraft.bio.trim() || 'The instructor biography will appear here.'}
                 </p>
               </div>
             </aside>
           </div>
 
-          <div className="space-y-3 border-t border-sky-50 px-5 py-5 sm:px-7">
+          <div className="min-w-0 space-y-3 border-t border-sky-50 px-3 py-4 sm:px-7 sm:py-5">
             <h3 className="text-base font-bold text-[#0B1F4D]">Instructor Profiles</h3>
             <p className="text-xs text-slate-500">Only published profiles appear on the public About Us page.</p>
             {instructors.length === 0 && !loading && !loadError && (
               <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-600">No instructor profiles have been added.</p>
             )}
             {instructors.map((instructor) => (
-              <article key={instructor.id} className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 p-3">
+              <article key={instructor.id} className="flex min-w-0 flex-wrap items-start gap-3 rounded-xl border border-slate-200 p-3 sm:items-center">
                 {instructor.photo_display_url ? (
-                  <img src={instructor.photo_display_url} alt="" className="h-12 w-12 rounded-full object-cover" />
+                  <img src={instructor.photo_display_url} alt="" className="h-12 w-12 shrink-0 rounded-full object-cover" />
                 ) : (
-                  <div className="flex h-12 w-12 items-center justify-center rounded-full bg-orange-100 font-bold text-orange-700">
+                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-orange-100 font-bold text-orange-700">
                     {instructor.full_name.charAt(0)}
                   </div>
                 )}
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-bold text-slate-900">{instructor.full_name}</p>
-                  <p className="truncate text-xs text-slate-600">{instructor.designation} · Order {instructor.display_order}</p>
+                  <p className="break-words [overflow-wrap:anywhere] text-sm font-bold text-slate-900">{instructor.full_name}</p>
+                  <p className="break-words [overflow-wrap:anywhere] text-xs text-slate-600">{instructor.designation} · Order {instructor.display_order}</p>
                   <p className={`mt-1 text-[10px] font-bold uppercase ${instructor.is_published ? 'text-emerald-700' : 'text-slate-500'}`}>
                     {instructor.is_published ? 'Published' : 'Draft'}
                   </p>
                 </div>
-                <div className="flex flex-wrap gap-1.5">
-                  <button type="button" onClick={() => editInstructor(instructor)} aria-label={`Edit ${instructor.full_name}`} className="rounded-md border border-slate-300 p-2 text-slate-700 hover:bg-slate-100">
+                <div className="flex w-full flex-wrap justify-end gap-2 sm:w-auto sm:gap-1.5">
+                  <button type="button" onClick={() => editInstructor(instructor)} aria-label={`Edit ${instructor.full_name}`} className="min-h-10 min-w-10 rounded-md border border-slate-300 p-2 text-slate-700 hover:bg-slate-100 sm:min-h-0 sm:min-w-0">
                     <Pencil className="h-4 w-4" />
                   </button>
-                  <button type="button" onClick={() => void toggleInstructorPublication(instructor)} className="rounded-md border border-slate-300 px-2 py-2 text-[10px] font-semibold text-slate-700 hover:bg-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => void toggleInstructorPublication(instructor)}
+                    className={`admin-publication-action min-h-10 rounded-md px-3 py-2 text-[10px] font-semibold sm:min-h-0 sm:px-2 ${
+                      instructor.is_published
+                        ? 'admin-publication-action--unpublish'
+                        : 'admin-publication-action--publish'
+                    }`}
+                  >
                     {instructor.is_published ? 'Unpublish' : 'Publish'}
                   </button>
-                  <button type="button" onClick={() => void deleteInstructor(instructor)} aria-label={`Delete ${instructor.full_name}`} className="rounded-md border border-rose-200 p-2 text-rose-700 hover:bg-rose-50">
+                  <button type="button" onClick={() => void deleteInstructor(instructor)} aria-label={`Delete ${instructor.full_name}`} className="min-h-10 min-w-10 rounded-md border border-rose-200 p-2 text-rose-700 hover:bg-rose-50 sm:min-h-0 sm:min-w-0">
                     <Trash2 className="h-4 w-4" />
                   </button>
                 </div>
@@ -783,14 +791,14 @@ export const AboutUsManagement: React.FC<{ currentAdmin: AdminProfile }> = ({ cu
           </div>
         </section>
 
-        <section className="space-y-4 rounded-2xl border border-sky-100 bg-white p-4 shadow-sm sm:p-6">
+        <section className="min-w-0 space-y-3 rounded-xl border border-sky-100 bg-white p-3 shadow-sm sm:space-y-4 sm:rounded-2xl sm:p-6">
           <div>
-            <h2 className="text-lg font-bold text-slate-900">Video Introduction</h2>
-            <p className="text-xs text-slate-500">Preview the YouTube video and poster before publishing.</p>
+            <h2 className="text-base font-bold text-slate-900 sm:text-lg">Video Introduction</h2>
+            <p className="text-xs leading-relaxed text-slate-500">Preview the YouTube video and poster before publishing.</p>
           </div>
 
           {videoMessage && (
-            <p role={videoMessage.type === 'error' ? 'alert' : 'status'} className={`rounded-lg p-3 text-xs ${
+            <p role={videoMessage.type === 'error' ? 'alert' : 'status'} className={`break-words [overflow-wrap:anywhere] rounded-lg p-3 text-xs ${
               videoMessage.type === 'success' ? 'bg-emerald-50 text-emerald-800' :
                 videoMessage.type === 'warning' ? 'bg-amber-50 text-amber-800' : 'bg-rose-50 text-rose-800'
             }`}>
@@ -798,7 +806,7 @@ export const AboutUsManagement: React.FC<{ currentAdmin: AdminProfile }> = ({ cu
             </p>
           )}
 
-          <form onSubmit={saveVideoConfiguration} className="space-y-4">
+          <form onSubmit={saveVideoConfiguration} className="min-w-0 space-y-3 sm:space-y-4">
             <label className="block space-y-1 text-xs font-semibold text-slate-700">
               YouTube video URL
               <input
@@ -809,11 +817,11 @@ export const AboutUsManagement: React.FC<{ currentAdmin: AdminProfile }> = ({ cu
                   setVideoDraft({ ...videoDraft, youtube_url: event.target.value });
                   setPreviewVideo(false);
                 }}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                className="min-w-0 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
               />
             </label>
-            <div className="flex flex-wrap items-center gap-3">
-              <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700">
+            <div className="flex min-w-0 flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:gap-3">
+              <label className="inline-flex min-h-11 max-w-full cursor-pointer items-center justify-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-center text-xs font-semibold text-slate-700 sm:min-h-0 sm:justify-start">
                 <Upload className="h-4 w-4" />
                 Upload / replace poster
                 <input
@@ -839,7 +847,7 @@ export const AboutUsManagement: React.FC<{ currentAdmin: AdminProfile }> = ({ cu
                       setRemovePoster(true);
                     }
                   }}
-                  className="text-xs font-semibold text-rose-700 hover:underline"
+                  className="min-h-10 self-start text-left text-xs font-semibold text-rose-700 hover:underline sm:min-h-0"
                 >
                   {removePoster ? 'Keep current poster' : 'Remove custom poster'}
                 </button>
@@ -847,7 +855,7 @@ export const AboutUsManagement: React.FC<{ currentAdmin: AdminProfile }> = ({ cu
             </div>
 
             {posterUrl && (
-              <div className="overflow-hidden rounded-xl border border-slate-200 bg-slate-900">
+              <div className="w-full max-w-full overflow-hidden rounded-xl border border-slate-200 bg-slate-900">
                 {!previewVideo ? (
                   <div className="relative aspect-video">
                     <img src={posterUrl} alt="Video poster preview" className="absolute inset-0 h-full w-full object-contain" />
@@ -870,15 +878,15 @@ export const AboutUsManagement: React.FC<{ currentAdmin: AdminProfile }> = ({ cu
               type="button"
               disabled={!videoId}
               onClick={() => setPreviewVideo(!previewVideo)}
-              className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 disabled:opacity-50"
+              className="min-h-11 w-full rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 disabled:opacity-50 sm:min-h-0 sm:w-auto"
             >
               {previewVideo ? 'Show poster preview' : 'Preview video'}
             </button>
-            <label className="flex items-center gap-2 text-xs font-semibold text-slate-700">
+            <label className="flex min-h-11 items-center gap-2 text-xs font-semibold text-slate-700">
               <input type="checkbox" checked={videoDraft.is_published} onChange={(event) => setVideoDraft({ ...videoDraft, is_published: event.target.checked })} className="accent-emerald-600" />
               Publish video configuration publicly
             </label>
-            <button type="submit" disabled={savingVideo || !videoId} className="inline-flex items-center gap-2 rounded-lg bg-orange-600 px-4 py-2.5 text-xs font-bold text-white disabled:opacity-60">
+            <button type="submit" disabled={savingVideo || !videoId} className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-orange-600 px-4 py-2.5 text-xs font-bold text-white disabled:opacity-60 sm:w-auto">
               {savingVideo ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
               {videoDraft.is_published ? 'Save & publish video' : 'Save video draft'}
             </button>

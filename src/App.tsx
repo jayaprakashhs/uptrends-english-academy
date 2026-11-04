@@ -377,11 +377,13 @@ export function App() {
       </main>
 
       {/* Footer */}
-      <Footer
-        setCurrentPage={setCurrentPage}
-        openCallbackModal={openCallbackModal}
-        branding={branding}
-      />
+      {currentPage !== 'apply' && (
+        <Footer
+          setCurrentPage={setCurrentPage}
+          openCallbackModal={openCallbackModal}
+          branding={branding}
+        />
+      )}
 
       {/* Global Modals */}
       <CallbackModal

@@ -16,6 +16,8 @@ import {
   X,
 } from 'lucide-react';
 import type { AdminProfile } from '../types';
+import { getWhatsAppUrl } from '../lib/whatsapp';
+import { PremiumDropdown } from './PremiumDropdown';
 
 type DemoClassStatus = 'Pending' | 'Contacted' | 'Scheduled' | 'Completed' | 'Cancelled';
 
@@ -190,15 +192,15 @@ export const AdminDemoClassRequests: React.FC<AdminDemoClassRequestsProps> = ({
   ];
 
   return (
-    <section className="space-y-6 rounded-3xl bg-[#FFF9F2] p-1 sm:p-2">
-      <header className="flex flex-col gap-4 rounded-2xl bg-gradient-to-br from-[#0B1F4D] via-[#123365] to-[#1B4778] p-5 text-white shadow-lg sm:flex-row sm:items-center sm:justify-between sm:p-7">
+    <section className="space-y-4 rounded-3xl bg-[#FFF9F2] p-1 sm:space-y-6 sm:p-2">
+      <header className="flex flex-col gap-3 rounded-2xl bg-gradient-to-br from-[#0B1F4D] via-[#123365] to-[#1B4778] p-4 text-white shadow-lg sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:p-7">
         <div className="flex items-start gap-3">
-          <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-white/10 text-orange-300 ring-1 ring-white/15">
-            <GraduationCap className="h-6 w-6" aria-hidden="true" />
+          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-white/10 text-orange-300 ring-1 ring-white/15 sm:h-12 sm:w-12">
+            <GraduationCap className="h-5 w-5 sm:h-6 sm:w-6" aria-hidden="true" />
           </span>
           <div>
             <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-orange-200">Student Engagement</p>
-            <h1 className="mt-1 text-xl font-extrabold sm:text-2xl">Demo Class Requests</h1>
+            <h1 className="mt-1 text-lg font-extrabold sm:text-2xl">Demo Class Requests</h1>
             <p className="mt-1 max-w-xl text-xs leading-relaxed text-blue-100 sm:text-sm">
               Review enquiries, coordinate a demo session, and keep each request moving.
             </p>
@@ -208,26 +210,26 @@ export const AdminDemoClassRequests: React.FC<AdminDemoClassRequestsProps> = ({
           type="button"
           onClick={() => void loadRequests()}
           disabled={loading}
-          className="inline-flex min-h-11 items-center justify-center gap-2 self-start rounded-xl border border-white/20 bg-white/10 px-4 py-2.5 text-xs font-bold text-white transition-colors hover:bg-white/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-300 disabled:opacity-60 sm:self-auto"
+          className="inline-flex min-h-10 items-center justify-center gap-2 self-start rounded-xl border border-white/20 bg-white/10 px-3 py-2 text-xs font-bold text-white transition-colors hover:bg-white/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-300 disabled:opacity-60 sm:min-h-11 sm:self-auto sm:px-4 sm:py-2.5"
         >
           <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} aria-hidden="true" />
           Refresh Requests
         </button>
       </header>
 
-      <div className="grid grid-cols-1 gap-3 min-[400px]:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-2 gap-2 sm:gap-3 xl:grid-cols-4">
         {summaryCards.map(({ label, value, note, Icon, tone, iconTone }) => (
-          <article key={label} className={`rounded-2xl border p-4 shadow-sm sm:p-5 ${tone}`}>
-            <div className="flex items-start justify-between gap-3">
+          <article key={label} className={`rounded-2xl border p-3 shadow-sm sm:p-5 ${tone}`}>
+            <div className="flex items-start justify-between gap-2 sm:gap-3">
               <div>
-                <p className="text-xs font-bold">{label}</p>
-                <p className="mt-2 text-3xl font-extrabold tracking-tight text-[#0B1F4D]">
-                  {loading ? <span className="inline-block h-9 w-10 animate-pulse rounded bg-current/10" aria-label="Loading count" /> : value}
+                <p className="text-[10px] font-bold leading-tight sm:text-xs">{label}</p>
+                <p className="mt-1 text-2xl font-extrabold tracking-tight text-[#0B1F4D] sm:mt-2 sm:text-3xl">
+                  {loading ? <span className="inline-block h-7 w-8 animate-pulse rounded bg-current/10 sm:h-9 sm:w-10" aria-label="Loading count" /> : value}
                 </p>
-                <p className="mt-1 text-[11px] opacity-80">{note}</p>
+                <p className="mt-1 text-[9px] leading-tight opacity-80 sm:text-[11px]">{note}</p>
               </div>
-              <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl ${iconTone}`}>
-                <Icon className="h-5 w-5" aria-hidden="true" />
+              <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-xl sm:h-10 sm:w-10 ${iconTone}`}>
+                <Icon className="h-4 w-4 sm:h-5 sm:w-5" aria-hidden="true" />
               </span>
             </div>
           </article>
@@ -264,17 +266,19 @@ export const AdminDemoClassRequests: React.FC<AdminDemoClassRequestsProps> = ({
             className="min-h-11 w-full rounded-xl border border-slate-200 py-2 pl-9 pr-3 text-sm outline-none transition focus:border-orange-500 focus:ring-2 focus:ring-orange-100"
           />
         </label>
-        <label className="flex min-h-11 items-center justify-between gap-3 rounded-xl border border-slate-200 px-3 text-xs font-bold text-slate-600 sm:justify-start">
-          Status
-          <select
+        <div className="flex min-h-11 items-center justify-between gap-3 rounded-xl border border-slate-200 px-3 text-xs font-bold text-slate-600 sm:justify-start">
+          <span>Status</span>
+          <PremiumDropdown
+            aria-label="Filter demo requests by status"
             value={statusFilter}
-            onChange={(event) => setStatusFilter(event.currentTarget.value as 'All' | DemoClassStatus)}
+            onChange={(value) => setStatusFilter(value as 'All' | DemoClassStatus)}
             className="min-h-9 min-w-32 rounded-lg bg-white px-2 text-sm text-[#0B1F4D] outline-none focus-visible:ring-2 focus-visible:ring-orange-500"
-          >
-            <option value="All">All statuses</option>
-            {demoStatuses.map((status) => <option key={status} value={status}>{status}</option>)}
-          </select>
-        </label>
+            options={[
+              { value: 'All', label: 'All statuses' },
+              ...demoStatuses.map((status) => ({ value: status, label: status })),
+            ]}
+          />
+        </div>
       </div>
 
       {loading ? (
@@ -305,9 +309,18 @@ export const AdminDemoClassRequests: React.FC<AdminDemoClassRequestsProps> = ({
                         <p className="mt-1 text-xs text-slate-500">{request.qualification_category} · {request.city}</p>
                       </td>
                       <td className="max-w-56 px-4 py-4 text-xs">
-                        <a href={`tel:${request.mobile}`} className="flex items-center gap-1.5 font-semibold text-slate-700 hover:text-orange-700">
-                          <Phone className="h-3.5 w-3.5 shrink-0 text-emerald-700" aria-hidden="true" />{request.mobile}
-                        </a>
+                        <div className="flex items-center gap-1.5">
+                          <a href={`tel:${request.mobile}`} aria-label={`Call ${request.mobile}`} title="Call" className="shrink-0 text-emerald-700 hover:text-emerald-800">
+                            <Phone className="h-3.5 w-3.5" aria-hidden="true" />
+                          </a>
+                          {getWhatsAppUrl(request.mobile) ? (
+                            <a href={getWhatsAppUrl(request.mobile)!} target="_blank" rel="noopener noreferrer" aria-label={`Chat with ${request.mobile} on WhatsApp`} onClick={(event) => event.stopPropagation()} className="font-semibold text-slate-700 hover:text-emerald-700">
+                              {request.mobile}
+                            </a>
+                          ) : (
+                            <span className="font-semibold text-slate-700">{request.mobile}</span>
+                          )}
+                        </div>
                         {request.email && (
                           <a href={`mailto:${request.email}`} className="mt-1.5 flex items-center gap-1.5 break-all text-slate-500 hover:text-orange-700">
                             <Mail className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />{request.email}
@@ -321,16 +334,15 @@ export const AdminDemoClassRequests: React.FC<AdminDemoClassRequestsProps> = ({
                       <td className="whitespace-nowrap px-4 py-4 text-xs text-slate-600">{formatDate(request.created_at)}                      </td>
                       <td className="px-4 py-4">
                         <div className="min-w-32">
-                          <label className="sr-only" htmlFor={`demo-status-${request.id}`}>Status for {request.full_name}</label>
-                          <select
+                          <PremiumDropdown
                             id={`demo-status-${request.id}`}
                             value={request.status}
                             disabled={savingId === request.id || deletingId === request.id}
-                            onChange={(event) => void changeStatus(request, event.currentTarget.value as DemoClassStatus)}
+                            onChange={(value) => void changeStatus(request, value as DemoClassStatus)}
                             className={`block min-h-10 w-full rounded-lg border px-2.5 text-xs font-bold outline-none transition focus-visible:ring-2 focus-visible:ring-orange-500 disabled:opacity-60 ${statusStyles[request.status]}`}
-                          >
-                            {demoStatuses.map((status) => <option key={status} value={status}>{status}</option>)}
-                          </select>
+                            aria-label={`Status for ${request.full_name}`}
+                            options={demoStatuses.map((status) => ({ value: status, label: status }))}
+                          />
                         </div>
                       </td>
                       <td className="px-4 py-4">
@@ -356,31 +368,39 @@ export const AdminDemoClassRequests: React.FC<AdminDemoClassRequestsProps> = ({
             </div>
           </div>
 
-          <div className="grid gap-3 lg:grid-cols-2 xl:hidden">
+          <div className="demo-class-request-list grid gap-3 lg:grid-cols-2 xl:hidden">
             {filteredRequests.map((request) => (
-              <article key={request.id} className="space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <article key={request.id} className="demo-class-request-card space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
                 <div className="flex items-start justify-between gap-3 border-b border-slate-100 pb-3">
                   <div className="min-w-0">
                     <h2 className="break-words font-bold text-[#0B1F4D]">{request.full_name}</h2>
                     <p className="mt-1 text-xs text-slate-500">{request.qualification_category} · {request.city}</p>
                   </div>
-                  <label className="w-32 shrink-0 space-y-1 text-[10px] font-bold uppercase tracking-wide text-slate-500">
-                    Status
-                    <select
+                  <div className="w-32 shrink-0 space-y-1 text-[10px] font-bold uppercase tracking-wide text-slate-500">
+                    <span className="block">Status</span>
+                    <PremiumDropdown
                       aria-label={`Status for ${request.full_name}`}
                       value={request.status}
                       disabled={savingId === request.id || deletingId === request.id}
-                      onChange={(event) => void changeStatus(request, event.currentTarget.value as DemoClassStatus)}
+                      onChange={(value) => void changeStatus(request, value as DemoClassStatus)}
                       className={`min-h-9 w-full rounded-lg border px-2 text-xs font-bold normal-case tracking-normal outline-none focus-visible:ring-2 focus-visible:ring-orange-500 disabled:opacity-60 ${statusStyles[request.status]}`}
-                    >
-                      {demoStatuses.map((status) => <option key={status} value={status}>{status}</option>)}
-                    </select>
-                  </label>
+                      options={demoStatuses.map((status) => ({ value: status, label: status }))}
+                    />
+                  </div>
                 </div>
                 <div className="grid gap-3 text-xs sm:grid-cols-2">
-                  <a href={`tel:${request.mobile}`} className="flex min-w-0 items-center gap-2 break-all font-semibold text-slate-700 hover:text-orange-700">
-                    <Phone className="h-4 w-4 shrink-0 text-emerald-700" aria-hidden="true" />{request.mobile}
-                  </a>
+                  <div className="flex min-w-0 items-center gap-2 break-all">
+                    <a href={`tel:${request.mobile}`} aria-label={`Call ${request.mobile}`} title="Call" className="shrink-0 text-emerald-700 hover:text-emerald-800">
+                      <Phone className="h-4 w-4" aria-hidden="true" />
+                    </a>
+                    {getWhatsAppUrl(request.mobile) ? (
+                      <a href={getWhatsAppUrl(request.mobile)!} target="_blank" rel="noopener noreferrer" aria-label={`Chat with ${request.mobile} on WhatsApp`} onClick={(event) => event.stopPropagation()} className="min-w-0 font-semibold text-slate-700 hover:text-emerald-700">
+                        {request.mobile}
+                      </a>
+                    ) : (
+                      <span className="min-w-0 font-semibold text-slate-700">{request.mobile}</span>
+                    )}
+                  </div>
                   {request.email && (
                     <a href={`mailto:${request.email}`} className="flex min-w-0 items-center gap-2 break-all text-slate-600 hover:text-orange-700">
                       <Mail className="h-4 w-4 shrink-0 text-blue-700" aria-hidden="true" />{request.email}

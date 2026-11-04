@@ -23,6 +23,13 @@ import {
   normalizeIndianMobileNumber,
 } from './contact-validation';
 import { renderBrandedEmail, type EmailBranding, type EmailContent } from './email-template';
+import { isAudienceTag } from './audience-tags';
+import {
+  getJoiningInformationErrors,
+  isValidJoiningInformation,
+  isValidJoiningInformationDraft,
+  type JoiningInformationSettings,
+} from './joining-information';
 
 interface Env {
   SUPABASE_URL?: string;
@@ -1593,9 +1600,9 @@ const READ_COLUMNS = {
   programs: 'id,title,slug,short_description,description,duration,course_mode,level,target_audience,age_range,image_url,image_object_key,is_published,display_order,created_at,updated_at',
   announcements: 'id,content,is_active,display_order,button_action,created_at,updated_at',
   reviews: 'id,author_name,rating,review_text,source,is_published,created_at,updated_at',
-  media: 'id,media_type,title,caption,r2_object_key,media_url,youtube_url,youtube_video_id,cover_image_url,alt_text,is_published,display_order,created_at,updated_at',
+  media: 'id,media_type,title,caption,r2_object_key,media_url,youtube_url,youtube_video_id,cover_image_url,alt_text,audience_tag,is_published,display_order,created_at,updated_at',
   faqs: 'id,question,answer,is_published,display_order,created_at,updated_at',
-  applications: 'id,application_reference,student_id,student_name,mobile,email,qualification,qualification_category,parent_phone,parent_email,school_name,college_name,occupation,place,city,program_id,program_name,date_of_birth,address,photo_object_key,photo_data_url,message,status,approved_by_name,approved_at,archived_at,archived_by,created_at',
+  applications: 'id,application_reference,student_id,student_name,mobile,email,qualification,qualification_category,parent_phone,parent_email,school_name,college_name,occupation,place,city,program_id,program_name,date_of_birth,address,photo_object_key,photo_data_url,message,status,approved_by_name,approved_at,joining_information,archived_at,archived_by,created_at',
   demoClassRequests: 'id,full_name,mobile,email,qualification_category,parent_name,school_or_college_name,college_name,profession,educational_qualification,date_of_birth,address,city,additional_information,status,created_at',
   notifications: 'id,application_id,notification_type,recipient_email,status,provider_message_id,error_message,pdf_attached,sent_at,created_at,updated_at,official_document_issuance_id',
   callbacks: 'id,full_name,mobile,email,program_name,preferred_contact_time,message,consent,status,created_at,updated_at',
@@ -1985,6 +1992,9 @@ const createMedia = async (request: Request, env: Env): Promise<Response> => {
 
   const title = requiredString(body.title, 'Media title', 300);
   if (isResponse(title)) return title;
+  if (!isAudienceTag(body.audience_tag)) {
+    return errorResponse('A valid audience_tag is required.', 400);
+  }
   const mediaType = body.media_type === 'video' ? 'video' : body.media_type === undefined || body.media_type === 'photo' ? 'photo' : null;
   if (!mediaType) return errorResponse('media_type must be either photo or video.', 400);
   const caption = optionalString(body.caption, 'caption', 5000);
@@ -2054,6 +2064,7 @@ const createMedia = async (request: Request, env: Env): Promise<Response> => {
     youtube_video_id: youtube?.id || null,
     cover_image_url: uploadedCover?.url || coverImageUrl,
     alt_text: altText || title,
+    audience_tag: body.audience_tag,
     is_published: body.is_published !== false,
     display_order: displayOrder,
   }).select().single();
@@ -2109,12 +2120,16 @@ const updateMedia = async (request: Request, env: Env, id: string): Promise<Resp
 
   const mediaType = body.media_type === undefined ? current.media_type : body.media_type;
   if (mediaType !== 'photo' && mediaType !== 'video') return errorResponse('media_type must be either photo or video.', 400);
+  if (body.audience_tag !== undefined && !isAudienceTag(body.audience_tag)) {
+    return errorResponse('audience_tag must be one of the supported audience tags.', 400);
+  }
   const previousObjectKey = objectKeyFromMetadata(env, current.r2_object_key, 'media');
   const removingStoredPhoto = mediaType === 'video' || body.media_file_base64 !== undefined;
   if (current.r2_object_key && removingStoredPhoto && !previousObjectKey) {
     return errorResponse('Stored media R2 object key is invalid; refusing to update metadata without safe cleanup.', 500);
   }
   const updates: Record<string, unknown> = { media_type: mediaType };
+  if (body.audience_tag !== undefined) updates.audience_tag = body.audience_tag;
   for (const [field, maxLength] of [['title', 300], ['caption', 5000], ['alt_text', 1000], ['cover_image_url', 2048]] as const) {
     if (body[field] === undefined) continue;
     const value = field === 'title' ? requiredString(body[field], field, maxLength) : optionalString(body[field], field, maxLength);
@@ -2643,22 +2658,36 @@ const approveApplication = async (request: Request, env: Env): Promise<Response>
 
   const approverName = optionalString(body.approved_by_name, 'approved_by_name', 300);
   if (isResponse(approverName)) return approverName;
-  if (!body.joining_information || typeof body.joining_information !== 'object' ||
-    Array.isArray(body.joining_information)) {
+  if (!isValidJoiningInformationDraft(body.joining_information)) {
     return errorResponse('Joining information is required to approve an application.', 400);
   }
-  const joiningBody = body.joining_information as Record<string, unknown>;
-  const joiningInformation = {
-    joiningDate: requiredString(joiningBody.joiningDate, 'Joining date', 100),
-    classSchedule: requiredString(joiningBody.classSchedule, 'Class schedule', 200),
-    classTimings: requiredString(joiningBody.classTimings, 'Class timings', 200),
-    venue: requiredString(joiningBody.venue, 'Venue', 500),
+  const joiningInformation: JoiningInformationSettings = {
+    joiningDate: body.joining_information.joiningDate.trim(),
+    classSchedule: body.joining_information.classSchedule.trim(),
+    classTimings: body.joining_information.classTimings.trim(),
+    venue: body.joining_information.venue.trim(),
   };
-  for (const value of Object.values(joiningInformation)) {
-    if (isResponse(value)) return value;
-    if (value.toLowerCase() === 'to be confirmed') {
-      return errorResponse('Replace every unconfirmed joining detail before approving.', 400);
-    }
+  if (!isValidJoiningInformation(joiningInformation)) {
+    const firstError = Object.values(getJoiningInformationErrors(joiningInformation))[0];
+    return errorResponse(firstError || 'Complete all joining information before approving.', 400);
+  }
+  const { data: savedApplication, error: saveError } = await auth.supabase
+    .from('applications')
+    .update({ joining_information: joiningInformation })
+    .eq('id', applicationId)
+    .eq('status', 'Pending')
+    .is('archived_at', null)
+    .select('id')
+    .maybeSingle();
+  if (saveError) {
+    console.error('Unable to persist joining information before approval.', {
+      operation: 'applications.approve.joining_information',
+      error_code: saveError.code || 'database_query_failed',
+    });
+    return errorResponse('Joining information could not be saved; the application was not approved.', 500);
+  }
+  if (!savedApplication) {
+    return errorResponse('The application is no longer pending or available for approval.', 409);
   }
   const { data: approvalResult, error: approvalError } = await auth.supabase.rpc(
     'approve_application_with_official_snapshot',
@@ -3201,6 +3230,43 @@ const updateApplicationStatus = async (request: Request, env: Env, id: string): 
     .maybeSingle();
   if (error) return errorResponse(`Unable to update application status: ${error.message}`, 500);
   return data ? json(data) : errorResponse('Application record not found.', 404);
+};
+
+const updateApplicationJoiningInformation = async (
+  request: Request,
+  env: Env,
+  id: string,
+): Promise<Response> => {
+  const auth = await requireAdmin(request, env, 'staff');
+  if (isResponse(auth)) return auth;
+  const body = await parseJson(request);
+  if (isResponse(body)) return body;
+  if (!isValidJoiningInformationDraft(body.joining_information)) {
+    return errorResponse('Joining information contains an invalid date, schedule, timing, placeholder, or venue.', 400);
+  }
+  const joiningInformation: JoiningInformationSettings = {
+    joiningDate: body.joining_information.joiningDate.trim(),
+    classSchedule: body.joining_information.classSchedule.trim(),
+    classTimings: body.joining_information.classTimings.trim(),
+    venue: body.joining_information.venue.trim(),
+  };
+  const { data, error } = await auth.supabase
+    .from('applications')
+    .update({ joining_information: joiningInformation })
+    .eq('id', id)
+    .eq('status', 'Pending')
+    .is('archived_at', null)
+    .select(READ_COLUMNS.applications)
+    .maybeSingle();
+  if (error) {
+    console.error('Unable to save application joining information.', {
+      operation: 'applications.joining_information.update',
+      error_code: error.code || 'database_query_failed',
+    });
+    return errorResponse('Unable to save joining information.', 500);
+  }
+  if (!data) return errorResponse('Only a pending, active application can have joining information updated.', 409);
+  return json(data);
 };
 
 const updateRequestStatus = async (
@@ -4478,6 +4544,21 @@ export async function handleApiRequest(request: Request, env: Env): Promise<Resp
       if (!validId(applicationId)) return errorResponse('Application ID must be a valid UUID.', 400);
       if (method === 'POST') return restoreApplication(request, env, applicationId);
       return methodNotAllowed(['POST']);
+    }
+
+    const applicationJoiningInformationRoute = pathname.match(
+      /^\/api\/admin\/applications\/([^/]+)\/joining-information$/,
+    );
+    if (applicationJoiningInformationRoute) {
+      let applicationId: string;
+      try { applicationId = decodeURIComponent(applicationJoiningInformationRoute[1]); } catch {
+        return errorResponse('Invalid application ID.', 400);
+      }
+      if (!validId(applicationId)) return errorResponse('Application ID must be a valid UUID.', 400);
+      if (method === 'PUT') {
+        return updateApplicationJoiningInformation(request, env, applicationId);
+      }
+      return methodNotAllowed(['PUT']);
     }
 
     const idRoute = pathname.match(/^\/api\/admin\/(programs|announcements|reviews|faqs|media|applications|demo-class-requests|callbacks|profiles)\/([^/]+)$/);

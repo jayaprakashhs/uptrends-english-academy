@@ -2,7 +2,22 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { isValidIndianMobileNumber, validateDemoClassRequest } from '../demo-class-request';
+import { getWhatsAppUrl } from '../src/lib/whatsapp';
 import { handleApiRequest } from '../worker-api';
+
+test('builds WhatsApp URLs from Indian and international phone numbers', () => {
+  assert.equal(getWhatsAppUrl('+91 (98765) 43210'), 'https://wa.me/919876543210');
+  assert.equal(getWhatsAppUrl('98765-43210'), 'https://wa.me/919876543210');
+  assert.equal(getWhatsAppUrl('09876543210'), 'https://wa.me/919876543210');
+  assert.equal(getWhatsAppUrl('+1 (202) 555-0123'), 'https://wa.me/12025550123');
+});
+
+test('does not create WhatsApp URLs for empty or invalid phone numbers', () => {
+  assert.equal(getWhatsAppUrl(''), null);
+  assert.equal(getWhatsAppUrl('12345'), null);
+  assert.equal(getWhatsAppUrl('0000000000'), null);
+  assert.equal(getWhatsAppUrl(null), null);
+});
 
 const requestBase = {
   full_name: 'Test Applicant',
