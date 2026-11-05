@@ -97,7 +97,6 @@ export interface OfficialDocumentInput {
   course: OfficialCourse | null;
   joiningInformation?: OfficialJoiningInformation;
   assets?: OfficialDocumentAssets;
-  versionNumber?: number;
   previewOnly?: boolean;
 }
 
@@ -169,7 +168,6 @@ export async function generateOfficialPdf({
   course,
   joiningInformation,
   assets,
-  versionNumber,
   previewOnly = false,
 }: OfficialDocumentInput): Promise<Uint8Array> {
   const pdf = await PDFDocument.create();
@@ -409,10 +407,7 @@ export async function generateOfficialPdf({
   if (previewOnly) {
     page.drawText('PREVIEW ONLY - NOT AN OFFICIAL STUDENT DOCUMENT', { x: margin, y: bannerY - 78, size: 7, font: bold, color: colors.orange, maxWidth: contentWidth });
   }
-  if (versionNumber) {
-    page.drawText(`Version ${versionNumber}`, { x: pageWidth - margin - bold.widthOfTextAtSize(`Version ${versionNumber}`, 7), y: bannerY - 78, size: 7, font: bold, color: colors.muted });
-  }
-  y = bannerY - (previewOnly || versionNumber ? 91 : 78);
+  y = bannerY - (previewOnly ? 91 : 78);
 
   const drawStudent = () => {
     drawSectionTitle(settings.sectionHeadings.student);

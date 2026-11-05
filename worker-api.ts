@@ -988,7 +988,6 @@ const loadCurrentBrandingLogo = async (
 const generatePdfFromSnapshot = async (
   env: Env,
   snapshotValue: unknown,
-  versionNumberOverride?: number,
 ): Promise<Uint8Array | Response> => {
   if (!snapshotValue || typeof snapshotValue !== 'object' || Array.isArray(snapshotValue)) {
     return errorResponse('The saved official document snapshot is invalid.', 500);
@@ -1078,7 +1077,6 @@ const generatePdfFromSnapshot = async (
       course,
       joiningInformation,
       assets,
-      versionNumber: versionNumberOverride ?? (Number.isInteger(snapshot.version_number) ? snapshot.version_number : undefined),
       previewOnly: snapshot.preview_only === true,
     });
     if (!bytes.length || bytes.length > 10 * 1024 * 1024 ||
@@ -1120,10 +1118,10 @@ const ensureIssuedOfficialPdf = async (
       if (stored.status !== 404) return stored;
       if (issuance.issuance_type === 'payment_update') return stored;
     }
-    return generatePdfFromSnapshot(env, snapshot, versionNumber);
+    return generatePdfFromSnapshot(env, snapshot);
   }
 
-  const bytes = await generatePdfFromSnapshot(env, snapshot, versionNumber);
+  const bytes = await generatePdfFromSnapshot(env, snapshot);
   if (isResponse(bytes)) return bytes;
   const bucket = env.APPLICATION_MEDIA;
   if (!bucket) return errorResponse('Private official document storage is not configured.', 503);

@@ -145,6 +145,7 @@ test('admission approval PDF contains real student details without fee or paymen
   assert.doesNotMatch(text, /PAYMENT PENDING|INR 0\.00|Net Payable Amount/);
   assert.doesNotMatch(text, /payment|paid|balance|transaction|INR|PRIVATE-REFERENCE|private-payment-id|upi/i);
   assert.doesNotMatch(text, /Spoken English|Business English|Other Course/);
+  assert.doesNotMatch(text, /\b(?:document\s*)?version\s*[:#-]?\s*\d+\b/i);
 });
 
 test('graduate and working PDFs use applicant contacts and never parent contacts', async () => {
@@ -433,6 +434,7 @@ test('approval attaches and stores the PDF generated from the immutable issuance
   const attachedText = decodePdfText(attachedPdf);
   assert.match(attachedText, /IELTS Preparation/);
   assert.match(attachedText, /UEA-STU-2026-0001/);
+  assert.doesNotMatch(attachedText, /\b(?:document\s*)?version\s*[:#-]?\s*\d+\b/i);
   assert.match(attachedText, /2026-02-01/);
   assert.match(attachedText, /Monday to Saturday/);
   assert.match(attachedText, /8:00 AM/);
@@ -1315,6 +1317,65 @@ test('ready issuances reject missing PDF object keys without regeneration or mut
     assert.equal(r2Writes, 0, `${name}: PDF generation must not write to R2`);
     assert.equal(databaseUpdates, 0, `${name}: issuance must not be updated`);
   }
+});
+
+test('regenerated issued PDFs omit the visible version label', async () => {
+  const key = `official-documents/${applicationId}/v2-eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee.pdf`;
+  let r2Writes = 0;
+  const env = makeWorkerEnv({
+    APPLICATION_MEDIA: {
+      get: async () => null,
+      put: async () => {
+        r2Writes += 1;
+      },
+      delete: async () => undefined,
+      list: async () => ({ objects: [] }),
+    },
+  });
+  const issuance = {
+    id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+    application_id: applicationId,
+    application_reference: student.applicationNumber,
+    version_number: 2,
+    issuance_type: 'approval',
+    status: 'ready',
+    pdf_object_key: key,
+    snapshot: {
+      version_number: 2,
+      application: {
+        id: applicationId,
+        application_reference: student.applicationNumber,
+        student_id: student.studentId,
+        student_name: student.fullName,
+        qualification: student.qualification,
+        program_name: student.programName,
+        email: student.email,
+        mobile: student.mobile,
+        date_of_birth: student.dateOfBirth,
+        address: student.address,
+      },
+      program: { name: selectedCourse.name, duration: selectedCourse.duration },
+      document_settings: DEFAULT_OFFICIAL_DOCUMENT_SETTINGS,
+    },
+  };
+
+  await withAdminFetch('admin', async (_request, url) => {
+    assert.ok(url.pathname.endsWith('/official_document_issuances'));
+    return Response.json([issuance]);
+  }, async () => {
+    const response = await handleApiRequest(
+      authorizedRequest(`/api/admin/official-document/issued?application_id=${applicationId}&version=2`),
+      env,
+    );
+    assert.equal(response.status, 200);
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    const text = decodePdfText(bytes);
+    assert.match(text, /ADMISSION CONFIRMATION/);
+    assert.match(text, /IELTS Preparation/);
+    assert.doesNotMatch(text, /\b(?:document\s*)?version\s*[:#-]?\s*\d+\b/i);
+  });
+
+  assert.equal(r2Writes, 0);
 });
 
 test('ready issuance serves the immutable historical PDF from R2 without overwriting it', async () => {
