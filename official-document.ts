@@ -85,20 +85,6 @@ export interface OfficialCourse {
   level: string | null;
 }
 
-export interface OfficialPaymentRecord {
-  id: string;
-  amount: number;
-  paymentMethod: string;
-  paymentStage: string;
-  recordedAt: string;
-  referenceNumber: string | null;
-}
-
-export interface OfficialPaymentSummary {
-  totalPaid: number;
-  payments: OfficialPaymentRecord[];
-}
-
 export interface OfficialDocumentAssets {
   logo?: { bytes: Uint8Array; mime: 'image/png' | 'image/jpeg' };
   graphic?: { bytes: Uint8Array; mime: 'image/png' | 'image/jpeg' };
@@ -113,15 +99,6 @@ export interface OfficialDocumentInput {
   assets?: OfficialDocumentAssets;
   versionNumber?: number;
   previewOnly?: boolean;
-}
-
-export interface PaymentReceiptInput {
-  settings: OfficialDocumentSettings;
-  student: OfficialStudent;
-  course: OfficialCourse | null;
-  payment: OfficialPaymentRecord;
-  totalPaid: number;
-  logo?: { bytes: Uint8Array; mime: 'image/png' | 'image/jpeg' };
 }
 
 export const DEFAULT_OFFICIAL_DOCUMENT_SETTINGS: OfficialDocumentSettings = {
@@ -168,24 +145,11 @@ export const DEFAULT_OFFICIAL_DOCUMENT_SETTINGS: OfficialDocumentSettings = {
   },
 };
 
-export const summarizeOfficialPayments = (
-  payments: OfficialPaymentRecord[],
-): OfficialPaymentSummary => {
-  const totalPaid = Math.round(payments.reduce((sum, payment) => sum + payment.amount, 0) * 100) / 100;
-  return { totalPaid, payments };
-};
-
 const printable = (value: unknown): string =>
   String(value ?? '')
     .replace(/[’‘]/g, "'")
     .replace(/[–—]/g, '-')
     .replace(/[^\x20-\x7E\u2022\u00B7]/g, '?');
-
-const printablePaymentStage = (value: string): string => {
-  if (value === 'first_fee') return 'first payment';
-  if (value === 'second_fee') return 'second payment';
-  return value.replaceAll('_', ' ');
-};
 
 const colorFromHex = (value: string) => {
   const hex = value.replace('#', '');
@@ -196,102 +160,8 @@ const colorFromHex = (value: string) => {
   );
 };
 
-const formatAmount = (value: number | null): string =>
-  value === null ? 'To be confirmed' : `INR ${value.toLocaleString('en-IN', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
-
 const pageDimensions = (pageSize: OfficialPageSize): [number, number] =>
   pageSize === 'Letter' ? [612, 792] : [595.28, 841.89];
-
-export async function generatePaymentReceiptPdf({
-  settings,
-  logo,
-  student,
-  course,
-  payment,
-  totalPaid,
-}: PaymentReceiptInput): Promise<Uint8Array> {
-  const pdf = await PDFDocument.create();
-  const regular = await pdf.embedFont(StandardFonts.Helvetica);
-  const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
-  const [pageWidth, pageHeight] = pageDimensions(settings.layout.pageSize);
-  const page = pdf.addPage([pageWidth, pageHeight]);
-  const margin = 42;
-  const ink = rgb(0.13, 0.17, 0.23);
-  const muted = rgb(0.38, 0.42, 0.48);
-  const navy = colorFromHex(settings.colors.navy);
-  const orange = colorFromHex(settings.colors.orange);
-  const green = colorFromHex(settings.colors.green);
-  const line = rgb(0.82, 0.86, 0.9);
-  let y = pageHeight - 48;
-
-  page.drawRectangle({ x: 0, y: pageHeight - 9, width: pageWidth, height: 9, color: orange });
-  if (logo) {
-    const image = logo.mime === 'image/png'
-      ? await pdf.embedPng(logo.bytes)
-      : await pdf.embedJpg(logo.bytes);
-    const scale = Math.min(58 / image.width, 48 / image.height);
-    page.drawImage(image, {
-      x: pageWidth - margin - image.width * scale,
-      y: pageHeight - 78,
-      width: image.width * scale,
-      height: image.height * scale,
-    });
-  }
-  page.drawText(printable(settings.academyName), {
-    x: margin,
-    y,
-    size: 18,
-    font: bold,
-    color: navy,
-    maxWidth: pageWidth - margin * 2,
-  });
-  y -= 22;
-  page.drawText(printable(settings.address), { x: margin, y, size: 8, font: regular, color: muted, maxWidth: pageWidth - margin * 2 });
-  y -= 14;
-  page.drawText(`${printable(settings.phone)} | ${printable(settings.email)}`, { x: margin, y, size: 8, font: regular, color: muted, maxWidth: pageWidth - margin * 2 });
-  y -= 38;
-  page.drawLine({ start: { x: margin, y }, end: { x: pageWidth - margin, y }, thickness: 1, color: line });
-  y -= 34;
-  page.drawText('PAYMENT RECEIPT', { x: margin, y, size: 18, font: bold, color: orange });
-  y -= 30;
-
-  const drawRow = (label: string, value: string) => {
-    page.drawText(printable(label), { x: margin, y, size: 9, font: bold, color: muted, maxWidth: 150 });
-    page.drawText(printable(value || '-'), { x: margin + 155, y, size: 10, font: regular, color: ink, maxWidth: pageWidth - margin * 2 - 155 });
-    y -= 22;
-  };
-  drawRow('Receipt reference', payment.id);
-  drawRow('Payment date', payment.recordedAt ? new Date(payment.recordedAt).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' }) : 'Not available');
-  drawRow('Student name', student.fullName);
-  drawRow('Application number', student.applicationNumber);
-  drawRow('Student ID', student.studentId);
-  drawRow('Selected program', course?.name || student.programName);
-  drawRow('Payment stage', printablePaymentStage(payment.paymentStage));
-  drawRow('Payment method', payment.paymentMethod.replaceAll('_', ' '));
-  drawRow('Transaction/reference', payment.referenceNumber || 'Not provided');
-  y -= 8;
-  page.drawRectangle({ x: margin, y: y - 58, width: pageWidth - margin * 2, height: 58, color: rgb(0.92, 0.98, 0.94), borderColor: green, borderWidth: 1 });
-  page.drawText('AMOUNT RECEIVED', { x: margin + 14, y: y - 20, size: 9, font: bold, color: green });
-  page.drawText(formatAmount(payment.amount), { x: margin + 14, y: y - 43, size: 16, font: bold, color: navy });
-  y -= 84;
-  drawRow('Total paid to date', formatAmount(totalPaid));
-  if (payment.paymentStage || payment.referenceNumber) y -= 6;
-  page.drawText('This receipt confirms the payment entry recorded in the academy payment register.', {
-    x: margin,
-    y,
-    size: 9,
-    font: regular,
-    color: muted,
-    maxWidth: pageWidth - margin * 2,
-  });
-  y -= 38;
-  page.drawLine({ start: { x: margin, y: 58 }, end: { x: pageWidth - margin, y: 58 }, thickness: 0.8, color: line });
-  page.drawText(printable(settings.footerText), { x: margin, y: 40, size: 8, font: regular, color: muted, maxWidth: pageWidth - margin * 2 });
-  return pdf.save();
-}
 
 export async function generateOfficialPdf({
   settings,

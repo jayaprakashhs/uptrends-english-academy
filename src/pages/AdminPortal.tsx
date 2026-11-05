@@ -31,7 +31,6 @@ import {
   Video,
   HelpCircle,
   Settings,
-  ShieldAlert,
   LogOut,
   Search,
   Filter,
@@ -393,9 +392,9 @@ useEffect(() => {
   const [deleteApplicationCandidate, setDeleteApplicationCandidate] = useState<StudentApplication | null>(null);
   const [deleteConfirmation, setDeleteConfirmation] = useState('');
   const [deletingApplicationId, setDeletingApplicationId] = useState<string | null>(null);
-  const [applicationErasureStatus, setApplicationErasureStatus] = useState<{
+  const [applicationDeletionStatus, setApplicationDeletionStatus] = useState<{
     jobId?: string;
-    status: 'storage_pending' | 'storage_failed' | 'database_failed' | 'completed' | 'blocked';
+    status: 'storage_pending' | 'storage_failed' | 'database_failed' | 'completed';
     message: string;
   } | null>(null);
   const [applicationJoiningInfo, setApplicationJoiningInfo] = useState<JoiningInformationSettings>({ ...DEFAULT_JOINING_INFORMATION });
@@ -1013,9 +1012,9 @@ const resetOfficialDocumentSettings = () => {
     if (!app || !isAdminOrHigher || deleteConfirmation !== 'DELETE' || deletingApplicationId) return;
 
     setDeletingApplicationId(app.id);
-    setApplicationErasureStatus({
+    setApplicationDeletionStatus({
       status: 'storage_pending',
-      message: 'Deletion is starting. The application will remain until verified photo/document cleanup and database finalization complete. Payment history and receipts are retained.',
+      message: 'Permanent deletion is in progress. The application will remain until its photo cleanup and database finalization complete. Issued official documents and required records are preserved.',
     });
     setActionMessage(null);
     try {
@@ -1033,15 +1032,15 @@ const resetOfficialDocumentSettings = () => {
       if (result.status !== 'completed') {
         const status = result.status === 'database_failed' ? 'database_failed' : 'storage_failed';
         const message = result.error || 'Cleanup is pending. Retry Delete to resume safely.';
-        setApplicationErasureStatus({ jobId: result.job_id, status, message });
-        setActionMessage({ type: 'warning', text: message });
+        setApplicationDeletionStatus({ jobId: result.job_id, status, message });
+        setActionMessage({ type: 'error', text: message });
         return;
       }
 
-      setApplicationErasureStatus({
+      setApplicationDeletionStatus({
         jobId: result.job_id,
         status: 'completed',
-        message: 'The application and verified application photo/admission documents were deleted. Payment records, receipts, audits, baselines, fee agreements, and payment-document history were preserved.',
+        message: 'The application and its exclusively verified photo were deleted. Issued official-document records were preserved.',
       });
       setDeleteApplicationCandidate(null);
       setDeleteConfirmation('');
@@ -1053,11 +1052,11 @@ const resetOfficialDocumentSettings = () => {
         });
         return;
       }
-      setActionMessage({ type: 'success', text: 'Student application erased; financial and payment history was preserved independently.' });
+      setActionMessage({ type: 'success', text: 'Student application deleted; required official records were preserved.' });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to delete the student application.';
-      setApplicationErasureStatus({
-        status: 'blocked',
+      setApplicationDeletionStatus({
+        status: 'database_failed',
         message,
       });
       setActionMessage({
@@ -2609,12 +2608,12 @@ const res = await fetchAdmin(url, {
                               disabled={Boolean(deletingApplicationId)}
                               onClick={() => {
                                 setDeleteConfirmation('');
-                                setApplicationErasureStatus(null);
+                                setApplicationDeletionStatus(null);
                                 setDeleteApplicationCandidate(app);
                               }}
                               className="col-span-2 inline-flex min-h-10 items-center justify-center rounded-lg border border-rose-200 bg-rose-600 px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-rose-700 disabled:opacity-50"
                             >
-                              Delete
+                              Delete permanently
                             </button>
                           )}
                         </div>
@@ -4642,7 +4641,7 @@ const res = await fetchAdmin(url, {
                 Permanently delete application?
               </h2>
               <p id="delete-application-warning" className="mt-2 text-sm leading-6 text-slate-700">
-                This action cannot be undone. It deletes the application and verified application photo/admission documents. Payment transactions, receipts, payment audits, historical baselines, fee agreements, and payment-update history are detached and preserved independently. Erasure remains blocked until the academy records its legal and retention approval.
+                This action cannot be undone. The application and its exclusively verified photo will be deleted. Issued official documents, issuance history, and retained financial records will be preserved.
               </p>
             </div>
             <dl className="grid gap-3 rounded-xl bg-slate-50 p-4 text-sm">
@@ -4655,29 +4654,25 @@ const res = await fetchAdmin(url, {
                 <dd className="break-all font-mono font-semibold text-slate-900">{deleteApplicationCandidate.application_reference}</dd>
               </div>
             </dl>
-            {applicationErasureStatus && (
+            {applicationDeletionStatus && (
               <p
                 role="status"
                 className={`rounded-lg px-3 py-2 text-sm ${
-                  applicationErasureStatus.status === 'completed'
+                  applicationDeletionStatus.status === 'completed'
                     ? 'bg-emerald-50 text-emerald-800'
-                    : applicationErasureStatus.status === 'blocked'
-                      ? 'bg-rose-50 text-rose-800'
-                      : applicationErasureStatus.status === 'storage_pending'
+                    : applicationDeletionStatus.status === 'storage_pending'
                         ? 'bg-amber-50 text-amber-900'
                         : 'bg-rose-50 text-rose-800'
                 }`}
               >
-                {applicationErasureStatus.status === 'completed'
+                {applicationDeletionStatus.status === 'completed'
                   ? 'Completed: '
-                  : applicationErasureStatus.status === 'storage_pending'
+                  : applicationDeletionStatus.status === 'storage_pending'
                     ? 'Pending: '
-                    : applicationErasureStatus.status === 'blocked'
-                      ? 'Blocked: '
-                      : 'Failed / retry required: '}
-                {applicationErasureStatus.message}
-                {applicationErasureStatus.jobId && (
-                  <span className="mt-1 block text-xs">Cleanup job: {applicationErasureStatus.jobId}</span>
+                    : 'Failed / retry required: '}
+                {applicationDeletionStatus.message}
+                {applicationDeletionStatus.jobId && (
+                  <span className="mt-1 block text-xs">Cleanup job: {applicationDeletionStatus.jobId}</span>
                 )}
               </p>
             )}
@@ -4701,7 +4696,7 @@ const res = await fetchAdmin(url, {
                 onClick={() => {
                   setDeleteApplicationCandidate(null);
                   setDeleteConfirmation('');
-                  setApplicationErasureStatus(null);
+                  setApplicationDeletionStatus(null);
                 }}
                 className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
               >

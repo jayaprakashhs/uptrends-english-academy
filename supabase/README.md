@@ -87,147 +87,84 @@ be generated when an application is accepted. No new environment variables are
 required; the existing server-side Supabase service-role key is used for
 callback and demo duplicate validation.
 
-## 2.3. Official Admission PDF and Payment Versions
+## 2.3. Official Admission Documents and Retained Payment History
 
-After applying `20261031000003_application_qualification_category.sql`, apply
-`supabase/migrations/20261031000004_official_document_payment_versions.sql`.
-It adds nullable `programs.course_mode`, payment-create idempotency metadata, and
-version/status fields to the existing `official_document_issuances` table.
-The authorized payment RPCs write audit rows in the same transaction as the
-payment mutation; prior versions also created `student_payment_update`
-document snapshots and delivery-history rows. This does not create duplicate
-payment, issuance, or notification tables.
+The historical migrations
+`20261031000004_official_document_payment_versions.sql`,
+`20261031000005_payment_document_audit_recovery.sql`,
+`20261101000008_remove_fee_dependencies_from_payments.sql`, and
+`20261102000003_separate_application_and_payment_retention.sql` created
+payment/audit records and payment-update issuance snapshots. These migration
+files remain in the repository as immutable history; their tables, existing
+records, audit evidence, notification history, and R2 objects are not deleted.
 
-The existing private `APPLICATION_MEDIA` R2 binding stores PDFs under
-version-specific keys. Forward-only migration
-`20261101000007_remove_lifecycle_automation.sql` removes claim/reconciliation
-automation while preserving payment, audit, issuance, and delivery-history
-records. Approval-email state is retained as read-only delivery evidence.
-Migration `20261101000008_remove_fee_dependencies_from_payments.sql`
-keeps payment RPCs and their audit/idempotency behavior without agreed-fee
-validation. Fee configuration and agreement records are retained but no longer
-available to the application. Migration
-`20261101000009_remove_certificate_email_lifecycle.sql` removes certificate
-email attempt/rejection-evidence history and its RPCs without touching
-certificate records, events, PDFs, or storage objects. Joining instructions
-remain in the existing `official_document_settings.document_data` JSON
-configuration. No additional environment variables are required.
+After applying the existing application-deletion migrations, apply the
+forward-only `supabase/migrations/20261105000004_disable_payment_operations.sql`.
+It revokes execution of payment mutation and payment-document enqueue RPCs and
+revokes direct API-role access to the private payment, agreement, audit, and
+baseline tables. It does not drop functions or tables, alter application
+deletion functions, or delete payment data, issued documents, PDFs, or storage
+objects. Security-definer application/document functions continue to run as
+their owner. The active application has no payment list/create/update/delete
+or receipt-generation/download/email API routes or UI.
 
-After applying `20261102000002_tracked_application_erasure.sql`, apply
-`supabase/migrations/20261102000003_separate_application_and_payment_retention.sql`.
-This forward-only migration adds payment identity and receipt-key snapshots,
-changes payment, fee-agreement, baseline, and notification application links
-to `ON DELETE SET NULL`, and replaces application erasure finalization so
-financial transactions, receipts, payment audits, historical baselines, fee
-agreements, payment-update issuance records, and payment-update email evidence
-are preserved and detached. Admission snapshots omit financial fields, while
-payment-update snapshots retain their separate payment summary.
-
-After migration 03, apply
-`supabase/migrations/20261102000004_preserve_official_documents_during_erasure.sql`.
-It changes issuance references to `ON DELETE SET NULL`, preserves every
-official-document issuance and PDF (including approval and payment-update
-versions), and limits storage cleanup to a verified, exclusively owned
-application photo that is not referenced by retained issuance snapshots.
-Detached document history and original PDF downloads remain accessible to
-Admins and Super Admins by application reference. The Worker fails closed
-until migration 04's preservation-readiness RPC is available. Migration 04
-refuses to install while an application-erasure job is incomplete; resolve
-its storage cleanup through the existing retry workflow before applying it.
-The existing
-legal, accounting, storage-retention, and external-retention approval gate
-remains required. Provider-side object versions/backups, legal holds, and
-already-delivered email copies are outside the erasure guarantee.
-
-The Admin Portal's Payments register is available to Admin and Super Admin
-independently of the Student Applications list. Payment receipts can be
-generated and emailed from saved transaction snapshots after an application
-is erased. Staff cannot browse the independent register. Official admission
-PDF generation and preview render student, course, and joining information
-only; legacy payment-update PDF objects are not modified by the migration, and
-their financial data is never read into newly generated official PDF bytes.
-Already-delivered email copies and provider-side R2 versions/backups are outside
-the erasure guarantee.
+Existing official-document history remains available to Admin and Super Admin,
+including previously issued payment-update PDFs when the original R2 object
+exists. The history endpoints do not expose payment-record data and do not
+reconstruct a missing historical payment PDF. Admission approval, preview,
+and notification flows continue to generate student/course/joining documents
+without financial content. Receipt PDFs and other legacy R2 objects are
+preserved but are no longer available through payment receipt routes.
 
 Migration `20261102000000_forward_historical_official_document_recovery.sql`
 replaces the Version 1 historical recovery function with stricter audit-stream
 validation for deployments where the original recovery migration has already
-run. It does not update application, payment, or document records.
+run. The payment-retirement migration also revokes this recovery RPC because
+its input depends on payment audit data. Existing official-document history
+and original PDFs remain available through the read-only history endpoints.
 
 The timestamp type validation in
 `20261031000005_payment_document_audit_recovery.sql` compares PostgreSQL's
-canonical `format_type` output (`timestamp with time zone`) while accepting
-the equivalent `timestamptz` catalog type on existing schemas. Its foreign-key
+canonical `format_type` output (`timestamp with time zone`) while accepting the
+equivalent `timestamptz` catalog type on existing schemas. Its foreign-key
 validation checks catalog relation, column, and delete-action identity rather
 than relying on display-formatted constraint text.
 
-### Historical Version 1 recovery
+### Student application permanent deletion
 
-After the payment-version and payment-audit recovery migrations have been
-verified, `20261031000006_historical_official_document_recovery.sql` provides
-the service-role-only `create_historical_official_document_version_one(uuid)`
-function. The Worker exposes it only to `super_admin` users at
-`POST /api/admin/official-document/historical-recovery`.
+Keep the forward-only migrations
+`20261102000001_safe_application_deletion.sql`,
+`20261102000002_tracked_application_erasure.sql`,
+`20261102000003_separate_application_and_payment_retention.sql`, and
+`20261102000004_preserve_official_documents_during_erasure.sql` applied in
+order. They reject unreviewed foreign-key dependencies, track retryable
+erasure, preserve official-document issuance records and PDFs, and limit R2
+cleanup to an application photo that is verified as exclusive and not needed
+by retained document history. Storage cleanup is verified before the
+transaction removes the application. Incomplete storage or database work
+remains retryable; completed applications no longer appear in the active
+Applications list.
 
-This path is separate from approval: it operates only on an existing Accepted
-application, never updates the application, payment, fee-agreement, or
-notification tables, and never sends an approval email. It reconstructs
-pre-approval payment state from ordered audit records, refuses incomplete or
-ambiguous evidence, and uses an application/version uniqueness constraint for
-idempotency. The generated recovery snapshot records that joining information
-and document settings are not historically verified. The recovery PDF loads the
-current configured `site_branding.logo_url` dynamically and fails visibly if
-that logo is missing or invalid.
+Apply
+`supabase/migrations/20261105000003_remove_application_archive_and_approval_gate.sql`
+after the previously applied migrations. This forward-only migration removes
+the archive columns, trigger, and RLS filter; permanently deletes the obsolete
+policy-management RPCs without deleting the policy or audit history; and
+replaces the erasure RPCs with active Admin/Super Admin checks. Staff receives
+HTTP 403 and cannot start or finalize deletion. The API requires typing
+`DELETE` and does not consult the retired legal/accounting or retention
+approval gate.
 
-### Tracked permanent application erasure
-
-The existing safeguard migration
-`supabase/migrations/20261102000001_safe_application_deletion.sql` must remain
-applied. Apply the forward-only
-`supabase/migrations/20261102000002_tracked_application_erasure.sql` only
-through the reviewed Supabase migration process. It verifies the current
-application, payment, and official-issuance foreign-key dependency map and
-stops if it finds an unreviewed relationship.
-
-The new API allows Admin and Super Admin only. A durable job locks the
-application against payment, notification, and document writes; inventories
-its stored photo and application-scoped official-document/receipt keys; and
-deletes only keys matching that application's approved object-key patterns.
-The photo key must be valid and referenced exclusively by that application;
-shared or unverifiable photo references block deletion. Shared academy assets
-and other application prefixes are not included. R2 cleanup is verified before
-one database transaction removes the application,
-payments, payment audit and baseline, fee agreement, notifications,
-approval-email state, and official-document issuance snapshots. A failed
-storage or database phase remains pending and can be resumed by submitting
-Delete again. The database phase rolls back completely on error.
-
-Completed jobs retain only an opaque job ID, the acting admin profile
-reference, timestamps, state, and aggregate deleted-row counts. The
-application reference and object-key inventory are cleared on completion.
-Neither the three previously identified test application IDs nor any other
-application is deleted by applying the migration.
-
-**Financial and tax erasure is disabled by default.** The migration creates
-`public.application_erasure_policy` with `enabled = false` and the storage and
-external-retention verification fields set to false; Delete returns HTTP 409
-until a database owner records legal/accounting approval and verifies the
-bucket's versioning, retention, and deletion behavior, plus the handling or
-exclusion of backups and external copies. Before changing this policy, the
-academy must obtain written advice from its accountant/legal adviser that
-erasing payment, receipt, audit, and official-document evidence is permitted
-for its registrations, open proceedings, and retention obligations. Do not
-enable the policy merely to remove a blocked application. The Worker can verify
-the currently listed R2 keys but cannot enumerate or erase provider-side
-versions, legal holds, backups, copies already delivered to email recipients,
-or other external copies. If those are enabled or in scope, this
-implementation cannot claim complete permanent erasure and must remain
-disabled.
-
-The migration has not been applied as part of this code change. Review the
-migration, schema compatibility, and retention approval before applying it;
-then deploy the Worker and Admin Portal changes through the normal reviewed
-release process.
+Deletion removes the application, its contact-registry row, application
+notifications, approval-email state, and an exclusively verified photo object
+key. Official-document issuance history and PDFs, payment and fee records,
+payment audit history, and retained payment-update notifications are preserved
+and detached as needed. R2 key deletion does not guarantee removal of older
+provider-side object versions, backups, legal holds, or copies already
+delivered outside the system; apply the bucket's independent retention and
+legal-hold procedures where applicable. Policy and policy-audit data from
+`20261105000001_application_erasure_policy_management.sql` remain unchanged;
+no approval evidence is created or policy enabled by this migration.
 
 ## 2.5. Super-Admin About Us Management
 

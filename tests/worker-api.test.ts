@@ -1565,127 +1565,37 @@ test('Supabase client initialization exceptions return safe JSON 503 and safe di
   assert.ok(logs.every((line) => !line.includes(publicSecret) && !line.includes(serviceSecret)));
 });
 
-test('payment routes fail closed when privileged Supabase credentials are missing', async () => {
-  const appId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
-  const routes = [
-    { path: `/api/admin/applications/${appId}/payments`, method: 'GET' },
-    { path: '/api/admin/payments', method: 'GET' },
-    { path: `/api/admin/payments/${appId}`, method: 'DELETE' },
-  ];
-
-  await withCapturedLogs(async () => {
-    for (const route of routes) {
-      const response = await handleApiRequest(
-        new Request(`https://academy.example${route.path}`, { method: route.method }),
-        {},
-      );
-      const body = await assertJson503(response);
-      assert.equal(
-        body.error,
-        'Admin APIs are unavailable because Supabase service credentials are not configured.',
-        route.path,
-      );
-    }
-  });
-});
-
-test('payment routes require authentication when privileged credentials are configured', async () => {
-  const appId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
-  const env = {
-    SUPABASE_URL: 'https://project.example',
-    SUPABASE_SERVICE_ROLE_KEY: 'test-service-role-key',
-  };
-
-  const requests = [
-    new Request(`https://academy.example/api/admin/applications/${appId}/payments`),
-    new Request('https://academy.example/api/admin/payments'),
-    new Request(`https://academy.example/api/admin/payments/${appId}`, {
-      method: 'DELETE',
-    }),
-  ];
-
-  for (const request of requests) {
-    const response = await handleApiRequest(request, env);
-    assert.equal(response.status, 401, new URL(request.url).pathname);
-    const body = await response.json() as { error: string };
-    assert.match(body.error, /^Unauthorized:/);
-  }
-});
-
-test('detached retained payments can be updated or deleted without application-document updates', async () => {
-  const paymentId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
-  const userId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
-  const rpcCalls: string[] = [];
+test('payment APIs and payment-backed recovery are unavailable without querying retained records', async () => {
+  const paths = [
+    ['/api/admin/applications/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb/payments', 'GET'],
+    ['/api/admin/applications/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb/payments', 'POST'],
+    ['/api/admin/payments', 'GET'],
+    ['/api/admin/payments', 'POST'],
+    ['/api/admin/payments/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'PUT'],
+    ['/api/admin/payments/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'DELETE'],
+    ['/api/admin/payments/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb/receipt', 'POST'],
+    ['/api/admin/payments/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb/receipt/file', 'GET'],
+    ['/api/admin/payments/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb/receipt/email', 'POST'],
+    ['/api/admin/official-document/historical-recovery', 'POST'],
+  ] as const;
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (input) => {
-    const path = new URL(input instanceof Request ? input.url : input.toString()).pathname;
-    if (path === '/auth/v1/user') {
-      return Response.json({ id: userId });
-    }
-    if (path === '/rest/v1/admin_profiles') {
-      return Response.json({
-        id: userId,
-        full_name: 'Test Admin',
-        role: 'admin',
-        is_active: true,
-      });
-    }
-    if (path === '/rest/v1/rpc/update_application_payment') {
-      rpcCalls.push('update');
-      return Response.json({
-        id: paymentId,
-        application_id: null,
-        updated_at: '2026-11-03T00:00:00.000Z',
-      });
-    }
-    if (path === '/rest/v1/rpc/delete_application_payment') {
-      rpcCalls.push('delete');
-      return Response.json({
-        deleted: true,
-        payment_id: paymentId,
-        application_id: null,
-      });
-    }
-    throw new Error(`Unexpected Supabase request: ${path}`);
+    const requestUrl = input instanceof Request ? input.url : input.toString();
+    assert.fail(`Unavailable payment API must not make a Supabase request: ${requestUrl}`);
   };
 
   try {
-    const env = {
-      SUPABASE_URL: 'https://project.example',
-      SUPABASE_SERVICE_ROLE_KEY: 'test-service-role-key',
-    };
-    const updateResponse = await handleApiRequest(
-      new Request(`https://academy.example/api/admin/payments/${paymentId}`, {
-        method: 'PUT',
-        headers: {
-          Authorization: 'Bearer test-admin-token',
-          'Content-Type': 'application/json',
+    for (const [path, method] of paths) {
+      const response = await handleApiRequest(
+        new Request(`https://academy.example${path}`, { method }),
+        {
+          SUPABASE_URL: 'https://project.example',
+          SUPABASE_SERVICE_ROLE_KEY: 'test-service-role-key',
         },
-        body: JSON.stringify({
-          amount: 125,
-          payment_method: 'upi',
-          payment_stage: 'installment',
-        }),
-      }),
-      env,
-    );
-    assert.equal(updateResponse.status, 200);
-    const updateBody = await updateResponse.json() as {
-      document_update: { success: boolean; status: string };
-    };
-    assert.deepEqual(updateBody.document_update, { success: true, status: 'not_applicable' });
-
-    const deleteResponse = await handleApiRequest(
-      new Request(`https://academy.example/api/admin/payments/${paymentId}`, {
-        method: 'DELETE',
-        headers: { Authorization: 'Bearer test-admin-token' },
-      }),
-      env,
-    );
-    assert.equal(deleteResponse.status, 200);
-    const deleteBody = await deleteResponse.json() as Record<string, unknown>;
-    assert.equal('document_update' in deleteBody, false);
-    assert.deepEqual(rpcCalls, ['update', 'delete']);
+      );
+      assert.equal(response.status, 404, `${method} ${path}`);
+      assert.deepEqual(await response.json(), { error: 'API route not found.' });
+    }
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -1705,20 +1615,6 @@ test('certificate administration and verification endpoints are unavailable', as
       {},
     );
     assert.equal(response.status, 404, path);
-  }
-});
-
-test('payment routes reject malformed application and payment IDs', async () => {
-  const requests = [
-    new Request('https://academy.example/api/admin/applications/not-a-uuid/payments'),
-    new Request('https://academy.example/api/admin/payments/not-a-uuid', {
-      method: 'DELETE',
-    }),
-  ];
-
-  for (const request of requests) {
-    const response = await handleApiRequest(request, {});
-    assert.equal(response.status, 400, new URL(request.url).pathname);
   }
 });
 

@@ -69,8 +69,6 @@ export interface StudentApplication {
     classTimings: string;
     venue: string;
   } | null;
-  archived_at?: string | null;
-  archived_by?: string | null;
   created_at: string;
 }
 

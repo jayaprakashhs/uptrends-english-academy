@@ -6,9 +6,7 @@ import { PDFDocument } from 'pdf-lib';
 import {
   DEFAULT_OFFICIAL_DOCUMENT_SETTINGS,
   mergeOfficialDocumentSettings,
-  generatePaymentReceiptPdf,
   generateOfficialPdf,
-  summarizeOfficialPayments,
   type OfficialCourse,
   type OfficialStudent,
 } from '../official-document';
@@ -39,132 +37,6 @@ const selectedCourse: OfficialCourse = {
   duration: '12 weeks',
   level: 'Intermediate',
 };
-
-test('payment receipt PDF uses the configured private logo asset', async () => {
-  const withoutLogo = await generatePaymentReceiptPdf({
-    settings: DEFAULT_OFFICIAL_DOCUMENT_SETTINGS,
-    student,
-    course: selectedCourse,
-    payment: {
-      id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
-      amount: 12500,
-      paymentMethod: 'bank_transfer',
-      paymentStage: 'registration',
-      recordedAt: '2026-01-02T03:04:05.000Z',
-      referenceNumber: 'REF-1',
-    },
-    totalPaid: 12500,
-  });
-
-  const withLogo = await generatePaymentReceiptPdf({
-    settings: DEFAULT_OFFICIAL_DOCUMENT_SETTINGS,
-    logo: { bytes: pngBytes, mime: 'image/png' },
-    student,
-    course: selectedCourse,
-    payment: {
-      id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
-      amount: 12500,
-      paymentMethod: 'bank_transfer',
-      paymentStage: 'registration',
-      recordedAt: '2026-01-02T03:04:05.000Z',
-      referenceNumber: 'REF-1',
-    },
-    totalPaid: 12500,
-  });
-  assert.ok(withLogo.length > withoutLogo.length);
-  const document = await PDFDocument.load(withLogo);
-  assert.equal(document.getPages().length, 1);
-  const text = decodePdfText(withLogo);
-  assert.match(text, /Total paid to date/);
-  assert.doesNotMatch(text, /Agreed payment total|Outstanding balance/i);
-});
-
-test('payment receipt can be generated from retained snapshots after application deletion', async () => {
-  const paymentId = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
-  const receiptKey = `official-documents/${applicationId}/receipt-v2-${paymentId}.pdf`;
-  const payment = {
-    id: paymentId,
-    application_id: null,
-    application_reference: student.applicationNumber,
-    student_id: student.studentId,
-    student_name: student.fullName,
-    student_email: student.email,
-    student_mobile: student.mobile,
-    student_qualification: student.qualification,
-    student_qualification_category: 'Graduate',
-    student_parent_phone: null,
-    student_parent_email: null,
-    student_date_of_birth: student.dateOfBirth,
-    student_address: student.address,
-    student_school_name: null,
-    student_college_name: null,
-    student_occupation: null,
-    student_place: 'Davangere',
-    student_city: 'Davangere',
-    program_name: student.programName,
-    course_duration: selectedCourse.duration,
-    course_mode: null,
-    course_level: selectedCourse.level,
-    receipt_object_key: receiptKey,
-    amount: 12500,
-    payment_method: 'bank_transfer',
-    payment_stage: 'registration',
-    recorded_at: '2026-01-02T03:04:05.000Z',
-    reference_number: 'RETAINED-REF',
-    notes: null,
-  };
-  const uploaded: Array<{ key: string; bytes: Uint8Array }> = [];
-  const env = makeWorkerEnv({
-    APPLICATION_MEDIA: {
-      get: async () => null,
-      put: async (key: string, value: Uint8Array) => uploaded.push({ key, bytes: value }),
-      delete: async () => undefined,
-      list: async () => ({ objects: [] }),
-    },
-  });
-
-  await withAdminFetch('admin', async (_request, url) => {
-    if (url.pathname === '/rest/v1/application_payments') {
-      return Response.json(url.searchParams.has('id')
-        ? payment
-        : [{
-          id: payment.id,
-          amount: payment.amount,
-          payment_method: payment.payment_method,
-          payment_stage: payment.payment_stage,
-          recorded_at: payment.recorded_at,
-          reference_number: payment.reference_number,
-        }]);
-    }
-    if (url.pathname === '/rest/v1/official_document_settings') {
-      return Response.json({
-        setting_key: 'admission_approval',
-        document_data: DEFAULT_OFFICIAL_DOCUMENT_SETTINGS,
-      });
-    }
-    throw new Error(`Unexpected request: ${url.pathname}`);
-  }, async () => {
-    const response = await handleApiRequest(
-      authorizedRequest(`/api/admin/payments/${paymentId}/receipt`, 'POST'),
-      env,
-    );
-    assert.equal(response.status, 200);
-    assert.deepEqual(await response.json(), {
-      success: true,
-      status: 'ready',
-      payment_id: paymentId,
-      receipt_url: `/api/admin/payments/${paymentId}/receipt/file`,
-    });
-  });
-
-  assert.equal(uploaded.length, 1);
-  assert.equal(uploaded[0]?.key, receiptKey);
-  const receiptText = decodePdfText(uploaded[0]!.bytes);
-  assert.match(receiptText, /Test Learner/);
-  assert.match(receiptText, /UEA-APP-2026-0001/);
-  assert.match(receiptText, /RETAINED-REF/);
-  assert.match(receiptText, /Total paid to date/);
-});
 
 const decodePdfText = (bytes: Uint8Array): string => {
   const source = Buffer.from(bytes).toString('latin1');
@@ -252,25 +124,14 @@ const authorizedRequest = (path: string, method = 'GET', body?: unknown) =>
   });
 
 test('admission approval PDF contains real student details without fee or payment content', async () => {
-  const legacyInput = {
+  const input = {
     settings: {
       ...DEFAULT_OFFICIAL_DOCUMENT_SETTINGS,
     },
     student,
     course: selectedCourse,
-    paymentSummary: summarizeOfficialPayments([{
-      id: 'private-payment-id',
-      amount: 98765,
-      paymentMethod: 'upi',
-      paymentStage: 'installment',
-      recordedAt: '2026-10-30T10:00:00Z',
-      referenceNumber: 'PRIVATE-REFERENCE',
-    }]),
-    includePaymentDetails: true,
   };
-  const bytes = await generateOfficialPdf(
-    legacyInput as unknown as Parameters<typeof generateOfficialPdf>[0],
-  );
+  const bytes = await generateOfficialPdf(input);
   const pdf = await PDFDocument.load(bytes);
   assert.equal(pdf.getPageCount(), 1);
   assert.equal(pdf.getPages()[0].getWidth(), 595.28);
@@ -324,21 +185,6 @@ test('missing photo and long joining details produce a readable multipage PDF', 
   assert.ok(pdf.getPageCount() > 1);
   assert.match(text, /End/);
   assert.match(text, /Last instruction/);
-});
-
-test('payment summary totals recorded payments without inferring fees or balances', () => {
-  assert.deepEqual(summarizeOfficialPayments([]), {
-    totalPaid: 0,
-    payments: [],
-  });
-  const payments = [
-    { id: 'payment-1', amount: 400, paymentMethod: 'upi', paymentStage: 'first_fee', recordedAt: '2026-10-30T10:00:00Z', referenceNumber: 'REF-1' },
-    { id: 'payment-2', amount: 300, paymentMethod: 'cash', paymentStage: 'installment', recordedAt: '2026-10-31T10:00:00Z', referenceNumber: null },
-  ];
-  assert.deepEqual(summarizeOfficialPayments(payments), {
-    totalPaid: 700,
-    payments,
-  });
 });
 
 test('legacy fee and payment settings are excluded from admission document settings', () => {
@@ -781,417 +627,6 @@ test('approval records a failed delivery without exposing an automatic retry end
   assert.match(savedPdfText, /UEA-STU-2026-0001/);
   assert.doesNotMatch(savedPdfText, /FEE BREAKDOWN|Net Payable Amount|TERMS & CONDITIONS/);
   assert.doesNotMatch(savedPdfText, /Current Editable Course|Other Course/);
-});
-
-test('recorded payment creates and emails an immutable PDF version using snapshot data', async () => {
-  const issuanceId = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
-  const paymentId = '99999999-9999-4999-8999-999999999999';
-  const idempotencyKey = '88888888-8888-4888-8888-888888888888';
-  const versionKey = `official-documents/${applicationId}/v2-${issuanceId}.pdf`;
-  const logoKey = 'official-document-assets/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.png';
-  const storedObjects = new Map<string, Uint8Array>();
-  const uploads: string[] = [];
-  const assetReads: string[] = [];
-  const paymentEmails: Record<string, unknown>[] = [];
-  let paymentCreateCalls = 0;
-  const snapshot = {
-    application: {
-      id: applicationId,
-      application_reference: student.applicationNumber,
-      student_id: student.studentId,
-      student_name: 'Student Category Learner',
-      qualification_category: 'Student',
-      qualification: '10th Standard',
-      program_name: 'Spoken English',
-      email: 'parent@example.com',
-      mobile: 'HIDDEN-APPLICANT-MOBILE',
-      parent_phone: '+919876500001',
-      parent_email: 'parent@example.com',
-      photo_object_key: photoKey,
-    },
-    program: { id: programId, name: 'Spoken English', duration: '3 months', mode: 'Regular classroom' },
-    fee: {
-      tuition_fee: 12000,
-      registration_fee: 500,
-      study_material_fee: 0,
-      other_charges: 0,
-      discount_type: 'amount',
-      discount_value: 500,
-      discount_amount: 500,
-      final_payable: 12000,
-      agreed_total: 10000,
-    },
-    payments: [
-      { id: 'payment-earlier', amount: 1500, payment_method: 'upi', payment_stage: 'first_fee', recorded_at: '2026-10-29T10:00:00Z', reference_number: 'UPI-7788' },
-      { id: paymentId, amount: 2500, payment_method: 'bank_transfer', payment_stage: 'installment', recorded_at: '2026-10-31T10:00:00Z', reference_number: 'BANK-REF-22' },
-    ],
-    document_settings: {
-      ...DEFAULT_OFFICIAL_DOCUMENT_SETTINGS,
-      logoObjectKey: logoKey,
-      joiningInstructions: ['Bring the admission confirmation slip.'],
-    },
-    joining_information: {
-      joiningDate: '2026-11-02',
-      classSchedule: 'Monday to Saturday',
-      classTimings: '8:00 AM – 9:00 AM',
-      venue: 'Davanagere Ram & Co Circle',
-    },
-    payment_summary: { total_payable: 10000, total_paid: 4000, outstanding_balance: 6000, status: 'partially_paid' },
-  };
-  const issuance: Record<string, any> = {
-    id: issuanceId,
-    application_id: applicationId,
-    application_reference: student.applicationNumber,
-    student_id: student.studentId,
-    version_number: 2,
-    issuance_type: 'payment_update',
-    snapshot,
-    pdf_object_key: null,
-    status: 'pending',
-  };
-  const notification = {
-    id: '77777777-7777-4777-8777-777777777777',
-    recipient_email: 'parent@example.com',
-    status: 'Pending',
-  };
-  const env = makeWorkerEnv({
-    APPLICATION_MEDIA: {
-      get: async (key: string) => {
-        assetReads.push(key);
-        const bytes = key === photoKey || key === logoKey ? pngBytes : storedObjects.get(key);
-        if (!bytes) return null;
-        return {
-          body: new ReadableStream<Uint8Array>({
-            start(controller) {
-              controller.enqueue(bytes);
-              controller.close();
-            },
-          }),
-          httpMetadata: { contentType: key === photoKey || key === logoKey ? 'image/png' : 'application/pdf' },
-        };
-      },
-      put: async (key: string, value: ArrayBuffer | ArrayBufferView) => {
-        const bytes = value instanceof ArrayBuffer
-          ? new Uint8Array(value)
-          : new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
-        storedObjects.set(key, bytes.slice());
-        uploads.push(key);
-      },
-      delete: async () => undefined,
-      list: async () => ({ objects: [] }),
-    },
-  });
-
-  await withAdminFetch('admin', async (request, url) => {
-    if (url.hostname === 'api.resend.com' && url.pathname === '/emails') {
-      assert.equal(request.headers.get('Idempotency-Key'), `student-payment-update-${issuanceId}`);
-      paymentEmails.push(await request.json() as Record<string, unknown>);
-      return Response.json({ id: 'payment-update-message-id' });
-    }
-    if (url.pathname.endsWith('/rpc/create_application_payment_idempotent')) {
-      paymentCreateCalls += 1;
-      const body = await request.json() as Record<string, unknown>;
-      assert.equal(body.p_application_id, applicationId);
-      assert.equal(body.p_idempotency_key, idempotencyKey);
-      return Response.json({ ...body, id: paymentId, application_id: applicationId, recorded_at: '2026-10-31T10:00:00Z' });
-    }
-    if (url.pathname.endsWith('/rpc/enqueue_official_document_payment_version')) {
-      const body = await request.json() as Record<string, unknown>;
-      assert.equal(body.p_application_id, applicationId);
-      assert.match(String(body.p_event_key), /^payment:/);
-      return Response.json(issuanceId);
-    }
-    if (url.pathname.endsWith('/official_document_issuances')) {
-      if (request.method === 'PATCH') {
-        Object.assign(issuance, await request.json() as Record<string, unknown>);
-        return new Response(null, { status: 204 });
-      }
-      if (url.searchParams.has('id')) return Response.json([issuance]);
-      return Response.json(issuance.status === 'ready' ? [] : [{ id: issuanceId, version_number: 2, status: 'pending' }]);
-    }
-    if (url.pathname.endsWith('/application_notifications')) {
-      if (request.method === 'GET') return Response.json([notification]);
-      Object.assign(notification, await request.json() as Record<string, unknown>);
-      return Response.json([notification]);
-    }
-    throw new Error(`Unexpected Supabase request: ${url.pathname}`);
-  }, async () => {
-    const makePaymentRequest = () => new Request(`https://academy.example/api/admin/applications/${applicationId}/payments`, {
-        method: 'POST',
-        headers: {
-          Authorization: 'Bearer test-admin-token',
-          'Content-Type': 'application/json',
-          'Idempotency-Key': idempotencyKey,
-        },
-        body: JSON.stringify({
-          amount: 2500,
-          payment_method: 'bank_transfer',
-          payment_stage: 'installment',
-          reference_number: 'BANK-REF-22',
-        }),
-      });
-    const response = await handleApiRequest(makePaymentRequest(), env);
-    assert.equal(response.status, 201);
-    const body = await response.json() as { document_update: { success: boolean; status: string; version_number?: number } };
-    assert.equal(body.document_update.success, true);
-    assert.equal(body.document_update.status, 'Sent');
-    assert.equal(body.document_update.version_number, 2);
-
-    const duplicateResponse = await handleApiRequest(makePaymentRequest(), env);
-    assert.equal(duplicateResponse.status, 201);
-    const duplicateBody = await duplicateResponse.json() as { document_update: { success: boolean; status: string } };
-    assert.equal(duplicateBody.document_update.success, true);
-    assert.equal(duplicateBody.document_update.status, 'Sent');
-  });
-
-  assert.equal(paymentCreateCalls, 2);
-  assert.deepEqual(uploads, [versionKey]);
-  assert.ok(assetReads.includes(photoKey));
-  assert.ok(assetReads.includes(logoKey));
-  assert.equal(paymentEmails.length, 1);
-  assert.equal(paymentEmails[0]?.to, 'parent@example.com');
-  assert.match(String(paymentEmails[0]?.subject), /Payment record updated/);
-  assert.doesNotMatch(String(paymentEmails[0]?.subject), /Congratulations|approved/i);
-  assert.match(String(paymentEmails[0]?.html), /Total recorded/);
-  assert.match(String(paymentEmails[0]?.html), /INR 4,000\.00/);
-  assert.doesNotMatch(String(paymentEmails[0]?.html), /outstanding|fully paid|partially paid|payment pending/i);
-  const attachments = paymentEmails[0]?.attachments as Array<{ content: string }>;
-  assert.equal(attachments.length, 1);
-  const pdfText = decodePdfText(new Uint8Array(Buffer.from(attachments[0].content, 'base64')));
-  assert.match(pdfText, /Version 2/);
-  assert.match(pdfText, /Parent Phone Number/);
-  assert.match(pdfText, /\+919876500001/);
-  assert.match(pdfText, /parent@example.com/);
-  assert.doesNotMatch(pdfText, /HIDDEN-APPLICANT-MOBILE/);
-  assert.match(pdfText, /Regular classroom/);
-  assert.doesNotMatch(pdfText, /UPI-7788|BANK-REF-22|Total paid to date|INR 4,000\.00/);
-  assert.doesNotMatch(pdfText, /PARTIALLY PAID|Outstanding Balance|INR 6,000.00/);
-  assert.doesNotMatch(pdfText, /FEE BREAKDOWN|Course Fee|Net Payable Amount|TERMS & CONDITIONS/);
-  assert.match(pdfText, /Bring the admission confirmation slip/);
-  assert.doesNotMatch(pdfText, /Saved attendance terms|TERMS & CONDITIONS/);
-});
-
-test('failed payment email is not automatically retried', async () => {
-  const issuanceId = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
-  const notificationId = '77777777-7777-4777-8777-777777777777';
-  const paymentId = '99999999-9999-4999-8999-999999999999';
-  const idempotencyKey = '88888888-8888-4888-8888-888888888888';
-  const versionKey = `official-documents/${applicationId}/v2-${issuanceId}.pdf`;
-  const storedObjects = new Map<string, Uint8Array>();
-  const uploads: string[] = [];
-  const resendPayloads: Record<string, unknown>[] = [];
-  let emailStatus = 'Pending';
-  let emailAttempts = 0;
-  const issuance: Record<string, any> = {
-    id: issuanceId,
-    application_id: applicationId,
-    application_reference: student.applicationNumber,
-    student_id: student.studentId,
-    version_number: 2,
-    issuance_type: 'payment_update',
-    snapshot: {
-      application: {
-        id: applicationId,
-        application_reference: student.applicationNumber,
-        student_id: student.studentId,
-        student_name: student.fullName,
-        qualification_category: 'Graduate',
-        qualification: student.qualification,
-        program_name: student.programName,
-        email: student.email,
-        mobile: student.mobile,
-      },
-      program: { name: student.programName, duration: '12 weeks' },
-      fee: { tuition_fee: 12000, final_payable: 12000, agreed_total: 12000 },
-      payments: [],
-      payment_summary: { total_payable: 12000, total_paid: 1000, outstanding_balance: 11000, status: 'partially_paid' },
-      document_settings: DEFAULT_OFFICIAL_DOCUMENT_SETTINGS,
-      joining_information: {},
-    },
-    pdf_object_key: null,
-    status: 'pending',
-  };
-  const notification: Record<string, unknown> = {
-    id: notificationId,
-    application_id: applicationId,
-    official_document_issuance_id: issuanceId,
-    notification_type: 'student_payment_update',
-    recipient_email: student.email,
-    status: 'Pending',
-  };
-  const env = makeWorkerEnv({
-    APPLICATION_MEDIA: {
-      get: async (key: string) => {
-        const bytes = storedObjects.get(key);
-        if (!bytes) return null;
-        return {
-          body: new ReadableStream<Uint8Array>({
-            start(controller) {
-              controller.enqueue(bytes);
-              controller.close();
-            },
-          }),
-          httpMetadata: { contentType: 'application/pdf' },
-        };
-      },
-      put: async (key: string, value: ArrayBuffer | ArrayBufferView) => {
-        const bytes = value instanceof ArrayBuffer
-          ? new Uint8Array(value)
-          : new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
-        storedObjects.set(key, bytes.slice());
-        uploads.push(key);
-      },
-      delete: async () => undefined,
-      list: async () => ({ objects: [] }),
-    },
-  });
-
-  await withAdminFetch('super_admin', async (request, url) => {
-    if (url.hostname === 'api.resend.com' && url.pathname === '/emails') {
-      emailAttempts += 1;
-      assert.equal(request.headers.get('Idempotency-Key'), `student-payment-update-${issuanceId}`);
-      resendPayloads.push(await request.json() as Record<string, unknown>);
-      return emailAttempts === 1
-        ? Response.json({ message: 'Temporary provider failure.' }, { status: 503 })
-        : Response.json({ id: 'payment-update-message-id' });
-    }
-    if (url.pathname.endsWith('/rpc/create_application_payment_idempotent')) {
-      const body = await request.json() as Record<string, unknown>;
-      assert.equal(body.p_idempotency_key, idempotencyKey);
-      return Response.json({ id: paymentId, application_id: applicationId });
-    }
-    if (url.pathname.endsWith('/rpc/enqueue_official_document_payment_version')) {
-      const body = await request.json() as Record<string, unknown>;
-      assert.equal(body.p_application_id, applicationId);
-      assert.match(String(body.p_event_key), /^payment:/);
-      return Response.json(issuanceId);
-    }
-    if (url.pathname.endsWith('/official_document_issuances')) {
-      if (request.method === 'PATCH') {
-        Object.assign(issuance, await request.json() as Record<string, unknown>);
-        return new Response(null, { status: 204 });
-      }
-      if (url.searchParams.has('id')) return Response.json([issuance]);
-      return Response.json(issuance.status === 'ready' ? [] : [{ id: issuanceId, version_number: 2, status: issuance.status }]);
-    }
-    if (url.pathname.endsWith('/application_notifications')) {
-      if (request.method === 'GET') return Response.json([notification]);
-      Object.assign(notification, await request.json() as Record<string, unknown>);
-      emailStatus = String(notification.status);
-      return Response.json([notification]);
-    }
-    if (url.pathname.endsWith('/applications')) {
-      return Response.json([{ application_reference: student.applicationNumber, student_id: student.studentId }]);
-    }
-    throw new Error(`Unexpected Supabase request: ${url.pathname}`);
-  }, async () => {
-    const paymentRequest = () => new Request(`https://academy.example/api/admin/applications/${applicationId}/payments`, {
-      method: 'POST',
-      headers: {
-        Authorization: 'Bearer test-admin-token',
-        'Content-Type': 'application/json',
-        'Idempotency-Key': idempotencyKey,
-      },
-      body: JSON.stringify({ amount: 1000, payment_method: 'upi', payment_stage: 'first_payment' }),
-    });
-    const savedPayment = await handleApiRequest(paymentRequest(), env);
-    assert.equal(savedPayment.status, 201);
-    const savedBody = await savedPayment.json() as { document_update: { success: boolean } };
-    assert.equal(savedBody.document_update.success, false);
-    assert.equal(issuance.status, 'ready');
-    assert.equal(emailStatus, 'Failed');
-
-    const retry = await handleApiRequest(
-      authorizedRequest('/api/retry-notification', 'POST', { notification_id: notificationId }),
-      env,
-    );
-    assert.equal(retry.status, 404);
-  });
-
-  assert.deepEqual(uploads, [versionKey]);
-  assert.equal(emailAttempts, 1);
-  assert.equal(emailStatus, 'Failed');
-  assert.equal(resendPayloads.length, 1);
-});
-
-test('a PDF generation failure leaves the recorded payment saved without automatic retry', async () => {
-  const issuanceId = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
-  const paymentId = '99999999-9999-4999-8999-999999999999';
-  const idempotencyKey = '88888888-8888-4888-8888-888888888888';
-  let paymentSaved = false;
-  const issuance: Record<string, any> = {
-    id: issuanceId,
-    application_id: applicationId,
-    application_reference: student.applicationNumber,
-    student_id: student.studentId,
-    version_number: 2,
-    issuance_type: 'payment_update',
-    snapshot: {
-      application: {
-        id: applicationId,
-        application_reference: student.applicationNumber,
-        student_id: student.studentId,
-        student_name: student.fullName,
-        email: student.email,
-        qualification: student.qualification,
-        qualification_category: 'Graduate',
-        program_name: student.programName,
-        photo_object_key: photoKey,
-      },
-      program: { name: student.programName, duration: '12 weeks' },
-      fee: { tuition_fee: 12000, final_payable: 12000, agreed_total: 12000 },
-      payments: [],
-      document_settings: DEFAULT_OFFICIAL_DOCUMENT_SETTINGS,
-      joining_information: {},
-    },
-    pdf_object_key: null,
-    status: 'pending',
-  };
-  const env = makeWorkerEnv({
-    APPLICATION_MEDIA: {
-      get: async () => null,
-      put: async () => { throw new Error('PDF generation should fail before upload.'); },
-      delete: async () => undefined,
-      list: async () => ({ objects: [] }),
-    },
-  });
-
-  await withAdminFetch('admin', async (request, url) => {
-    if (url.pathname.endsWith('/rpc/create_application_payment_idempotent')) {
-      paymentSaved = true;
-      return Response.json({ id: paymentId, application_id: applicationId });
-    }
-    if (url.pathname.endsWith('/rpc/enqueue_official_document_payment_version')) {
-      const body = await request.json() as Record<string, unknown>;
-      assert.equal(body.p_application_id, applicationId);
-      assert.match(String(body.p_event_key), /^payment:/);
-      return Response.json(issuanceId);
-    }
-    if (url.pathname.endsWith('/official_document_issuances')) {
-      return Response.json(url.searchParams.has('id') ? [issuance] : [{ id: issuanceId, version_number: 2, status: 'pending' }]);
-    }
-    throw new Error(`Unexpected Supabase request: ${url.pathname}`);
-  }, async () => {
-    const response = await handleApiRequest(
-      new Request(`https://academy.example/api/admin/applications/${applicationId}/payments`, {
-        method: 'POST',
-        headers: {
-          Authorization: 'Bearer test-admin-token',
-          'Content-Type': 'application/json',
-          'Idempotency-Key': idempotencyKey,
-        },
-        body: JSON.stringify({ amount: 1000, payment_method: 'upi', payment_stage: 'first_payment' }),
-      }),
-      env,
-    );
-    assert.equal(response.status, 201);
-    const body = await response.json() as { payment: { id: string }; document_update: { success: boolean } };
-    assert.equal(body.payment.id, paymentId);
-    assert.equal(body.document_update.success, false);
-  });
-
-  assert.equal(paymentSaved, true);
-  assert.equal(issuance.status, 'pending');
 });
 
 test('authorized admins can list and download detached official-document history by application reference', async () => {
@@ -1781,133 +1216,39 @@ test('payment audit baseline timestamp validation supports fresh and existing sc
   assert.doesNotMatch(migration, /DROP TABLE|DELETE FROM public\.(applications|application_payments|application_payment_audit|official_document_issuances)|TRUNCATE/);
 });
 
-test('historical recovery endpoint creates no approval email and reuses an existing issuance', async () => {
-  const issuanceId = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
-  const historicalApplicationId = '20d33902-b695-488f-bba2-414b8eaab2c1';
-  const snapshot = {
-    application: {
-      id: historicalApplicationId,
-      application_reference: 'UEA-2026-D622',
-      student_id: 'UEA-STU-2026-0001',
-      student_name: 'Historical Learner',
-      email: 'historical@example.com',
-      mobile: '+919999999999',
-      qualification: 'Graduate',
-      program_name: 'Spoken English Course - Beginner to Advanced',
-      photo_object_key: null,
-    },
-    program: { id: programId, name: 'Spoken English Course - Beginner to Advanced' },
-    fee: { agreed_total: 10000, final_payable: 10000 },
-    payment_summary: {
-      total_payable: 10000,
-      total_paid: 4000,
-      outstanding_balance: 6000,
-      status: 'partially_paid',
-      payments: [{
-        id: '11111111-1111-4111-8111-111111111111',
-        amount: 4000,
-        payment_method: 'cash',
-        payment_stage: 'first_fee',
-        recorded_at: '2026-10-27T14:00:00Z',
-        reference_number: null,
-      }],
-    },
-    document_settings: DEFAULT_OFFICIAL_DOCUMENT_SETTINGS,
-    joining_information: {},
-    historical_recovery: {
-      is_historical_recovery: true,
-      document_settings: 'current_state_only',
-      branding: 'current_site_branding_at_pdf_generation',
-    },
-  };
-  const issuance: Record<string, any> = {
-    id: issuanceId,
-    application_id: historicalApplicationId,
-    application_reference: 'UEA-2026-D622',
-    student_id: 'UEA-STU-2026-0001',
-    version_number: 1,
-    issuance_type: 'approval',
-    snapshot,
-    pdf_object_key: null,
-    status: 'pending',
-  };
-  const uploaded: string[] = [];
-  let storedPdf: Uint8Array | null = null;
-  let rpcCalls = 0;
-  let emailCalls = 0;
-  const env = makeWorkerEnv({
-    APPLICATION_MEDIA: {
-      get: async (key: string) => storedPdf && key === `official-documents/${historicalApplicationId}/v1-${issuanceId}.pdf`
-        ? {
-          body: new ReadableStream<Uint8Array>({
-            start(controller) {
-              controller.enqueue(storedPdf!);
-              controller.close();
-            },
-          }),
-          httpMetadata: { contentType: 'application/pdf' },
-        }
-        : null,
-      put: async (key: string, value: ArrayBuffer | ArrayBufferView) => {
-        uploaded.push(key);
-        storedPdf = value instanceof ArrayBuffer
-          ? new Uint8Array(value)
-          : new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
-      },
-      delete: async () => undefined,
-      list: async () => ({ objects: [] }),
-    },
-  });
-
-  await withAdminFetch('super_admin', async (request, url) => {
-    if (url.hostname === 'branding.example') {
-      return new Response(pngBytes, { headers: { 'content-type': 'image/png' } });
-    }
-    if (url.pathname.endsWith('/rpc/create_historical_official_document_version_one')) {
-      rpcCalls += 1;
-      return Response.json({ created: rpcCalls === 1, issuance });
-    }
-    if (url.pathname.endsWith('/rest/v1/site_branding')) {
-      return Response.json([{ logo_url: 'https://branding.example/logo.png' }]);
-    }
-    if (url.pathname.endsWith('/rest/v1/official_document_issuances')) {
-      assert.equal(request.method, 'PATCH');
-      issuance.pdf_object_key = `official-documents/${historicalApplicationId}/v1-${issuanceId}.pdf`;
-      issuance.status = 'ready';
-      return new Response(null, { status: 204 });
-    }
-    if (url.hostname === 'api.resend.com') {
-      emailCalls += 1;
-      throw new Error('Historical recovery must not call the email provider.');
-    }
-    throw new Error(`Unexpected request: ${url.hostname}${url.pathname}`);
-  }, async () => {
-    const first = await handleApiRequest(
-      authorizedRequest('/api/admin/official-document/historical-recovery', 'POST', {
-        application_id: historicalApplicationId,
-      }),
-      env,
-    );
-    assert.equal(first.status, 200);
-    const firstBody = await first.json() as { created: boolean; email_sent: boolean; status: string };
-    assert.equal(firstBody.created, true);
-    assert.equal(firstBody.email_sent, false);
-    assert.equal(firstBody.status, 'ready');
-
-    const second = await handleApiRequest(
-      authorizedRequest('/api/admin/official-document/historical-recovery', 'POST', {
-        application_id: historicalApplicationId,
-      }),
-      env,
-    );
-    assert.equal(second.status, 200);
-    const secondBody = await second.json() as { created: boolean; email_sent: boolean };
-    assert.equal(secondBody.created, false);
-    assert.equal(secondBody.email_sent, false);
-  });
-
-  assert.deepEqual(uploaded, [`official-documents/${historicalApplicationId}/v1-${issuanceId}.pdf`]);
-  assert.equal(emailCalls, 0);
+test('payment retirement migration conditionally revokes existing APIs without deleting retained records', async () => {
+  const migration = await readFile(
+    new URL('../supabase/migrations/20261105000004_disable_payment_operations.sql', import.meta.url),
+    'utf8',
+  );
+  for (const signature of [
+    'public.assert_payment_admin(uuid)',
+    'public.create_application_payment(uuid,uuid,numeric,text,text,text,text)',
+    'public.create_application_payment_idempotent(uuid,uuid,numeric,text,text,text,text,uuid)',
+    'public.update_application_payment(uuid,uuid,numeric,text,text,text,text)',
+    'public.delete_application_payment(uuid,uuid)',
+    'public.enqueue_official_document_payment_version(uuid,text)',
+    'public.build_official_document_snapshot_for_payment_event(uuid,uuid)',
+    'public.create_historical_official_document_version_one(uuid)',
+  ]) {
+    assert.ok(migration.includes(`'${signature}'`));
+  }
+  for (const signature of [
+    'public.set_application_agreed_fee(uuid,uuid,numeric,text)',
+    'public.reconcile_payment_document_versions(uuid)',
+    'public.snapshot_application_payment_identity()',
+  ]) {
+    assert.ok(migration.includes(`'${signature}'`));
+  }
+  assert.match(migration, /to_regprocedure\(function_signature\)/);
+  assert.match(migration, /REVOKE ALL ON FUNCTION %s FROM PUBLIC, anon, authenticated, service_role/);
+  assert.match(migration, /to_regclass\(format\('public\.%I', table_name\)\)/);
+  assert.match(migration, /REVOKE ALL ON TABLE %s FROM PUBLIC, anon, authenticated, service_role/);
+  assert.match(migration, /application_fee_agreements/);
+  assert.match(migration, /application_payment_audit/);
+  assert.match(migration, /application_payment_historical_baseline/);
+  assert.match(migration, /FROM PUBLIC, anon, authenticated, service_role/);
+  assert.doesNotMatch(migration, /DROP|DELETE FROM|TRUNCATE|UPDATE public\./);
 });
 
 test('historical recovery logo loading rejects unsafe redirects and caps response bodies', async () => {
@@ -2145,15 +1486,11 @@ test('historical payment identity fixtures preserve null foreign keys and event 
   assert.match(recoveryMigration, /event\.payment_id = baseline\.payment_id/);
 });
 
-test('legacy payment event keys remain canonical and action-specific', async () => {
+test('historical payment event keys remain canonical and action-specific', async () => {
   const recoveryMigration = await readFile(
     new URL('../supabase/migrations/20261031000005_payment_document_audit_recovery.sql', import.meta.url),
     'utf8',
   );
-  const worker = await readFile(new URL('../worker-api.ts', import.meta.url), 'utf8');
-  assert.match(worker, /payment:\$\{paymentId\}:created/);
-  assert.match(worker, /payment:\$\{String\(updatedPayment\.id\)\}:updated/);
-  assert.match(worker, /payment:\$\{deletedPaymentId\}:deleted/);
   assert.match(recoveryMigration, /payment-audit:' \|\| v_audit_id::text/);
   assert.match(recoveryMigration, /v_action = 'created' AND after_data->>'created_at'/);
   assert.match(recoveryMigration, /v_action = 'updated' AND after_data->>'updated_at'/);

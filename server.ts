@@ -1614,17 +1614,12 @@ app.post('/api/callback-request', async (req, res) => {
 // Route application joining-information writes explicitly through the shared Worker handler.
 app.put('/api/admin/applications/:id/joining-information', dispatchWorkerApi);
 
-// Route document, payment, and demo-request workflows through the shared Worker handlers.
+// Route application documents and demo requests through the shared Worker handlers.
 app.all(
   [
     '/api/admin/applications',
     '/api/admin/applications/:id',
-    '/api/admin/applications/:id/archive',
-    '/api/admin/applications/:id/restore',
-    '/api/admin/applications/:id/payments',
     '/api/admin/application-erasure-jobs/:id',
-    '/api/admin/payments',
-    '/api/admin/payments/:paymentId',
     '/api/demo-class-requests',
     '/api/admin/demo-class-requests',
     '/api/admin/demo-class-requests/:id',
@@ -2137,6 +2132,10 @@ app.delete('/api/admin/faqs/:id', async (req, res) => {
   memoryStore.faqs = memoryStore.faqs.filter(f => f.id !== id);
   if (memoryStore.faqs.length === previousCount) return res.status(404).json({ error: 'FAQ not found.' });
   return res.json({ success: true });
+});
+
+app.all('/api/*', (_req, res) => {
+  res.status(404).json({ error: 'API route not found.' });
 });
 
 // -------------------------------------------------------------

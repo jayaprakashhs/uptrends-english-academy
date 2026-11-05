@@ -1,13 +1,11 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import {
   DEFAULT_OFFICIAL_DOCUMENT_SETTINGS,
-  generatePaymentReceiptPdf,
   generateOfficialPdf,
   isValidOfficialDocumentSettings,
   mergeOfficialDocumentSettings,
   type OfficialCourse,
   type OfficialDocumentSettings,
-  type OfficialPaymentRecord,
 } from './official-document';
 import {
   legacyUploadFilenameFromMetadata,
@@ -721,52 +719,6 @@ const buildApprovalEmail = (
   };
 };
 
-const buildPaymentUpdateEmail = (
-  snapshotValue: unknown,
-  pdfBytes: Uint8Array,
-  versionNumber: number,
-): ApprovalEmail | Response => {
-  if (!snapshotValue || typeof snapshotValue !== 'object' || Array.isArray(snapshotValue)) {
-    return errorResponse('The saved payment document snapshot is invalid.', 500);
-  }
-  const snapshot = snapshotValue as Record<string, any>;
-  const student = snapshot.application;
-  const summary = snapshot.payment_summary;
-  if (!student || typeof student !== 'object' ||
-    typeof student.email !== 'string' || !student.email.trim() ||
-    typeof student.student_name !== 'string' ||
-    typeof student.application_reference !== 'string') {
-    return errorResponse('The saved payment snapshot is missing the applicant email or reference.', 500);
-  }
-  if (!summary || typeof summary !== 'object') {
-    return errorResponse('The saved payment snapshot is missing its payment summary.', 500);
-  }
-  const totalPaid = Number(summary.total_paid);
-  if (!Number.isFinite(totalPaid) || totalPaid < 0) {
-    return errorResponse('The saved payment snapshot has an invalid total.', 500);
-  }
-  const formattedTotalPaid = `INR ${totalPaid.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  const reference = student.application_reference.replace(/[^A-Za-z0-9_-]/g, '_');
-  return {
-    to: student.email,
-    subject: `Payment record updated — Uptrend's English Academy`,
-    content: {
-      title: 'Payment Record Updated',
-      greeting: student.student_name,
-      paragraphs: [
-        `Your payment record for application ${student.application_reference} has been updated.`,
-        `Total recorded: ${formattedTotalPaid}.`,
-        `The latest official document, Version ${versionNumber}, is attached.`,
-      ],
-      details: [{ label: 'Application Number', value: student.application_reference }],
-    },
-    attachments: [{
-      filename: `Official_Document_V${versionNumber}_${reference}.pdf`,
-      content: toBase64(pdfBytes),
-    }],
-  };
-};
-
 const toBase64 = (bytes: Uint8Array): string => {
   let binary = '';
   const chunkSize = 0x8000;
@@ -886,7 +838,7 @@ const readPrivateR2Object = async (
     ? /^applications\/[0-9a-f-]+\.(?:jpg|png|webp)$/i.test(key)
     : expectedPrefix === 'official-document-assets'
       ? /^official-document-assets\/[0-9a-f-]+\.(?:jpg|png|webp)$/i.test(key)
-      : /^official-documents\/(?:[0-9a-f-]+\.pdf|[0-9a-f-]+\/(?:v[0-9]+-[0-9a-f-]+|receipt(?:-v2)?-[0-9a-f-]+)\.pdf)$/i.test(key);
+      : /^official-documents\/(?:[0-9a-f-]+\.pdf|[0-9a-f-]+\/v[0-9]+-[0-9a-f-]+\.pdf)$/i.test(key);
   if (!validKey) return errorResponse('Private document storage metadata is invalid.', 500);
   const bucket = env.APPLICATION_MEDIA;
   if (!bucket?.get) return errorResponse('Private document storage is not configured.', 503);
@@ -945,168 +897,6 @@ const courseFromSnapshot = (snapshot: Record<string, any>): OfficialCourse | nul
     mode: typeof program.mode === 'string' ? program.mode : null,
     level: typeof program.level === 'string' ? program.level : null,
   };
-};
-
-type PaymentReceiptContext = {
-  application: Record<string, any>;
-  payment: Record<string, any>;
-  settings: OfficialDocumentSettings;
-  course: OfficialCourse | null;
-  logo?: { bytes: Uint8Array; mime: 'image/png' | 'image/jpeg' };
-  totalPaid: number;
-};
-
-const loadPaymentReceiptContext = async (
-  supabase: SupabaseClient,
-  env: Env,
-  paymentId: string,
-): Promise<PaymentReceiptContext | Response> => {
-  const { data: payment, error: paymentError } = await supabase
-    .from('application_payments')
-    .select('id,application_id,application_reference,student_id,student_name,student_email,student_mobile,student_qualification,student_qualification_category,student_parent_phone,student_parent_email,student_date_of_birth,student_address,student_school_name,student_college_name,student_occupation,student_place,student_city,program_name,course_duration,course_mode,course_level,receipt_object_key,amount,payment_method,payment_stage,recorded_at,reference_number,notes')
-    .eq('id', paymentId)
-    .maybeSingle();
-  if (paymentError || !payment) return errorResponse('Payment record not found.', 404);
-
-  if (payment.application_id) {
-    const { data: activeApplication, error: applicationError } = await supabase
-      .from('applications')
-      .select('status')
-      .eq('id', payment.application_id)
-      .maybeSingle();
-    if (applicationError) return errorResponse('Unable to verify the payment application status.', 500);
-    if (activeApplication && activeApplication.status !== 'Accepted') {
-      return errorResponse('Receipts are available only for approved students.', 409);
-    }
-    if (!activeApplication) return errorResponse('Payment application link is inconsistent.', 409);
-  }
-  const application = {
-    id: payment.application_id,
-    application_reference: payment.application_reference,
-    student_id: payment.student_id,
-    student_name: payment.student_name,
-    email: payment.student_email,
-    mobile: payment.student_mobile,
-    qualification: payment.student_qualification,
-    qualification_category: payment.student_qualification_category,
-    parent_phone: payment.student_parent_phone,
-    parent_email: payment.student_parent_email,
-    date_of_birth: payment.student_date_of_birth,
-    address: payment.student_address,
-    school_name: payment.student_school_name,
-    college_name: payment.student_college_name,
-    occupation: payment.student_occupation,
-    place: payment.student_place,
-    city: payment.student_city,
-    program_name: payment.program_name,
-  };
-  if (typeof application.application_reference !== 'string' ||
-    typeof application.student_name !== 'string' ||
-    typeof application.program_name !== 'string') {
-    return errorResponse('The saved payment identity snapshot is incomplete.', 409);
-  }
-
-  const paymentGroupQuery = supabase
-    .from('application_payments')
-    .select('id,amount,payment_method,payment_stage,recorded_at,reference_number')
-    .eq('application_reference', application.application_reference)
-    .order('recorded_at', { ascending: true });
-  const [paymentsResult, settingsResult] = await Promise.all([
-    paymentGroupQuery,
-    supabase.from('official_document_settings').select('document_data').eq('setting_key', 'admission_approval').maybeSingle(),
-  ]);
-  if (paymentsResult.error || settingsResult.error) {
-    return errorResponse('Unable to load payment receipt details.', 500);
-  }
-  const settings = mergeOfficialDocumentSettings(settingsResult.data?.document_data ?? DEFAULT_OFFICIAL_DOCUMENT_SETTINGS);
-  if (!settings) return errorResponse('Saved official document settings are invalid.', 503);
-  const totalPaid = Math.round((paymentsResult.data || []).reduce((sum, item) => sum + Number(item.amount), 0) * 100) / 100;
-  const course = courseFromSnapshot({
-    program: {
-      name: application.program_name,
-      duration: payment.course_duration,
-      mode: payment.course_mode,
-      level: payment.course_level,
-    },
-  });
-  let logo: PaymentReceiptContext['logo'];
-  if (settings.logoObjectKey) {
-    const storedLogo = await readPrivateR2Object(env, settings.logoObjectKey, 'official-document-assets');
-    if (isResponse(storedLogo)) return storedLogo;
-    if (storedLogo.mime === 'image/png' || storedLogo.mime === 'image/jpeg') {
-      logo = { bytes: storedLogo.bytes, mime: storedLogo.mime };
-    }
-  }
-  return {
-    application,
-    payment,
-    settings,
-    course,
-    logo,
-    totalPaid,
-  };
-};
-
-const ensurePaymentReceiptPdf = async (
-  supabase: SupabaseClient,
-  env: Env,
-  paymentId: string,
-): Promise<{ bytes: Uint8Array; key: string; context: PaymentReceiptContext } | Response> => {
-  const context = await loadPaymentReceiptContext(supabase, env, paymentId);
-  if (isResponse(context)) return context;
-  const key = typeof context.payment.receipt_object_key === 'string'
-    ? context.payment.receipt_object_key
-    : context.application.id
-      ? `official-documents/${context.application.id}/receipt-v2-${paymentId}.pdf`
-      : '';
-  if (!/^official-documents\/[0-9a-f-]+\/receipt-v2-[0-9a-f-]+\.pdf$/i.test(key) ||
-    !key.endsWith(`/receipt-v2-${paymentId}.pdf`)) {
-    return errorResponse('The saved payment receipt storage reference is invalid.', 409);
-  }
-  const existing = await readPrivateR2Object(env, key, 'official-documents');
-  if (!isResponse(existing)) return { bytes: existing.bytes, key, context };
-  if (existing.status !== 404) return existing;
-  const bytes = await generatePaymentReceiptPdf({
-    settings: context.settings,
-    logo: context.logo,
-    student: {
-      fullName: context.application.student_name,
-      studentId: context.application.student_id,
-      applicationNumber: context.application.application_reference,
-      qualification: context.application.qualification || '',
-      programName: context.application.program_name || '',
-      email: context.application.email || '',
-      mobile: context.application.mobile || '',
-      dateOfBirth: context.application.date_of_birth || null,
-      address: context.application.address || null,
-    },
-    course: context.course,
-    payment: {
-      id: context.payment.id,
-      amount: Number(context.payment.amount),
-      paymentMethod: context.payment.payment_method,
-      paymentStage: context.payment.payment_stage,
-      recordedAt: context.payment.recorded_at,
-      referenceNumber: context.payment.reference_number,
-    },
-    totalPaid: context.totalPaid,
-  });
-  const bucket = env.APPLICATION_MEDIA;
-  if (!bucket) return errorResponse('Private receipt storage is not configured.', 503);
-  const storeReceipt = async (): Promise<Response | null> => {
-      try {
-        await bucket.put(key, bytes, { httpMetadata: { contentType: 'application/pdf' } });
-      } catch (error) {
-        console.error('Unable to store payment receipt PDF.', { operation: 'payment.receipt.store', error: messageOf(error) });
-        return errorResponse('The payment receipt could not be stored.', 502);
-      }
-      return null;
-  };
-  const storageResult = context.application.id
-    ? await withApplicationErasureWriteLease(supabase, context.application.id, storeReceipt)
-    : await storeReceipt();
-  if (isResponse(storageResult)) return storageResult;
-  return { bytes, key, context };
 };
 
 const loadCurrentBrandingLogo = async (
@@ -1396,193 +1186,6 @@ const ensureIssuedOfficialPdf = async (
   });
 };
 
-type PaymentDocumentDeliveryResult = {
-  success: boolean;
-  status: string;
-  version_number?: number;
-  pdf_ready?: boolean;
-  error?: string;
-};
-
-const processPaymentDocumentIssuance = async (
-  supabase: SupabaseClient,
-  env: Env,
-  issuanceId: string,
-): Promise<PaymentDocumentDeliveryResult> => {
-  const { data: loaded, error: loadError } = await supabase
-    .from('official_document_issuances')
-    .select('id,application_id,application_reference,student_id,version_number,issuance_type,snapshot,pdf_object_key,status')
-    .eq('id', issuanceId)
-    .maybeSingle();
-  if (loadError || !loaded || !loaded.application_id) {
-    return { success: false, status: 'failed', error: 'Unable to load the queued payment document.' };
-  }
-  if (loaded.issuance_type !== 'payment_update') {
-    return { success: false, status: 'failed', error: 'The queued issuance is not a payment update.' };
-  }
-
-  let issuance: Record<string, any> = loaded;
-  if (issuance.status !== 'ready') {
-    if (issuance.status === 'failed' || issuance.status === 'processing') {
-      return {
-        success: false,
-        status: issuance.status,
-        version_number: issuance.version_number,
-        error: 'This payment document is not automatically retried.',
-      };
-    }
-    const bytes = await generatePdfFromSnapshot(env, issuance.snapshot, issuance.version_number);
-    if (isResponse(bytes)) return { success: false, status: 'failed', version_number: issuance.version_number, error: 'The payment PDF could not be generated.' };
-
-    const objectKey = `official-documents/${issuance.application_id}/v${issuance.version_number}-${issuance.id}.pdf`;
-    const mediaBucket = env.APPLICATION_MEDIA;
-    if (!mediaBucket?.put) {
-      return { success: false, status: 'failed', version_number: issuance.version_number, error: 'Payment saved; private PDF storage is not configured.' };
-    }
-    const storageResult = await withApplicationErasureWriteLease(
-      supabase,
-      issuance.application_id,
-      async () => {
-        try {
-          await mediaBucket.put(objectKey, bytes, { httpMetadata: { contentType: 'application/pdf' } });
-        } catch (error) {
-          console.error('Payment PDF storage failed after the payment was saved.', {
-            operation: 'official_document.payment_version.store',
-            error: messageOf(error),
-          });
-          return errorResponse('Payment saved; PDF storage failed.', 502);
-        }
-
-        const { error: updateError } = await supabase
-          .from('official_document_issuances')
-          .update({ pdf_object_key: objectKey, status: 'ready', generated_at: new Date().toISOString() })
-          .eq('id', issuance.id);
-        if (updateError) {
-          console.error('Generated payment PDF could not be marked ready.', {
-            operation: 'official_document.payment_version.complete',
-            error_code: updateError.code || 'database_query_failed',
-          });
-          return errorResponse('Payment saved; its PDF record could not be updated.', 502);
-        }
-        return null;
-      },
-    );
-    if (isResponse(storageResult)) {
-      return {
-        success: false,
-        status: 'failed',
-        version_number: issuance.version_number,
-        error: 'Payment saved, but the application is being deleted or its PDF could not be stored.',
-      };
-    }
-    issuance = { ...issuance, status: 'ready', pdf_object_key: objectKey };
-  }
-
-  const pdfBytes = await ensureIssuedOfficialPdf(
-    supabase,
-    env,
-    issuance,
-    issuance.snapshot,
-    issuance.application_id,
-  );
-  if (isResponse(pdfBytes)) {
-    return { success: false, status: 'failed', version_number: issuance.version_number, pdf_ready: true, error: 'The saved payment PDF could not be read for email delivery.' };
-  }
-
-  const { data: notification, error: notificationError } = await supabase
-    .from('application_notifications')
-    .select('id,recipient_email,status')
-    .eq('official_document_issuance_id', issuance.id)
-    .eq('notification_type', 'student_payment_update')
-    .maybeSingle();
-  if (notificationError || !notification) {
-    return { success: false, status: 'failed', version_number: issuance.version_number, pdf_ready: true, error: 'The payment email record is unavailable.' };
-  }
-  if (notification.status === 'Sent') {
-    return { success: true, status: 'Sent', version_number: issuance.version_number, pdf_ready: true };
-  }
-
-  const paymentEmail = buildPaymentUpdateEmail(issuance.snapshot, pdfBytes, issuance.version_number);
-  if (isResponse(paymentEmail)) return { success: false, status: 'Failed', version_number: issuance.version_number, pdf_ready: true, error: 'Payment email could not be built.' };
-
-  const notificationResult = await withApplicationErasureWriteLease(
-    supabase,
-    issuance.application_id,
-    async () => {
-      const emailResult = await sendEmail(env, {
-        ...paymentEmail,
-        idempotencyKey: `student-payment-update-${issuance.id}`,
-      });
-      const { error: updateNotificationError } = await supabase
-        .from('application_notifications')
-        .update({
-          status: emailResult.success ? 'Sent' : 'Failed',
-          provider_message_id: emailResult.provider_message_id,
-          error_message: emailResult.error || null,
-          sent_at: emailResult.success ? new Date().toISOString() : null,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', notification.id);
-      if (updateNotificationError) {
-        return errorResponse('Email was processed, but its result could not be recorded.', 502);
-      }
-      return emailResult;
-    },
-  );
-  if (isResponse(notificationResult)) {
-    return {
-      success: false,
-      status: 'Failed',
-      version_number: issuance.version_number,
-      pdf_ready: true,
-      error: notificationResult.status === 409
-        ? 'Application deletion is in progress; the payment email was not sent.'
-        : 'Payment email was processed, but its result could not be recorded.',
-    };
-  }
-  if (!notificationResult) {
-    return { success: false, status: 'Failed', version_number: issuance.version_number, pdf_ready: true, error: 'Email was processed, but its result could not be recorded.' };
-  }
-  return {
-    success: notificationResult.success,
-    status: notificationResult.success ? 'Sent' : 'Failed',
-    version_number: issuance.version_number,
-    ...(notificationResult.error ? { error: notificationResult.error } : {}),
-  };
-};
-
-const enqueuePaymentDocumentVersion = async (
-  supabase: SupabaseClient,
-  applicationId: string,
-  eventKey: string,
-): Promise<string | null> => {
-  try {
-    const { data, error } = await supabase.rpc('enqueue_official_document_payment_version', {
-      p_application_id: applicationId,
-      p_event_key: eventKey,
-    });
-    const response = Array.isArray(data) ? data[0] : data;
-    const issuanceId = typeof response === 'string'
-      ? response
-      : response && typeof response === 'object'
-        ? Object.values(response as Record<string, unknown>).find((value): value is string => validId(String(value)))
-        : null;
-    if (!error && issuanceId && validId(issuanceId)) return issuanceId;
-
-    console.error('Payment was saved, but its official PDF version could not be confirmed in the queue.', {
-      operation: 'official_document.payment_version.enqueue',
-      error_code: error?.code || (issuanceId ? 'invalid_response' : 'not_eligible_or_not_queued'),
-    });
-    return null;
-  } catch (error) {
-    console.error('Payment was saved, but its official PDF version could not be queued.', {
-      operation: 'official_document.payment_version.enqueue',
-      error_code: 'request_failed',
-    });
-    return null;
-  }
-};
-
 const readTable = async (
   supabase: SupabaseClient,
   table: string,
@@ -1602,7 +1205,7 @@ const READ_COLUMNS = {
   reviews: 'id,author_name,rating,review_text,source,is_published,created_at,updated_at',
   media: 'id,media_type,title,caption,r2_object_key,media_url,youtube_url,youtube_video_id,cover_image_url,alt_text,audience_tag,is_published,display_order,created_at,updated_at',
   faqs: 'id,question,answer,is_published,display_order,created_at,updated_at',
-  applications: 'id,application_reference,student_id,student_name,mobile,email,qualification,qualification_category,parent_phone,parent_email,school_name,college_name,occupation,place,city,program_id,program_name,date_of_birth,address,photo_object_key,photo_data_url,message,status,approved_by_name,approved_at,joining_information,archived_at,archived_by,created_at',
+  applications: 'id,application_reference,student_id,student_name,mobile,email,qualification,qualification_category,parent_phone,parent_email,school_name,college_name,occupation,place,city,program_id,program_name,date_of_birth,address,photo_object_key,photo_data_url,message,status,approved_by_name,approved_at,joining_information,created_at',
   demoClassRequests: 'id,full_name,mobile,email,qualification_category,parent_name,school_or_college_name,college_name,profession,educational_qualification,date_of_birth,address,city,additional_information,status,created_at',
   notifications: 'id,application_id,notification_type,recipient_email,status,provider_message_id,error_message,pdf_attached,sent_at,created_at,updated_at,official_document_issuance_id',
   callbacks: 'id,full_name,mobile,email,program_name,preferred_contact_time,message,consent,status,created_at,updated_at',
@@ -1626,17 +1229,10 @@ const adminTable = async (
 const getAdminApplications = async (request: Request, env: Env): Promise<Response> => {
   const auth = await requireAdmin(request, env, 'staff');
   if (isResponse(auth)) return auth;
-  const archivedParam = new URL(request.url).searchParams.get('archived');
-  if (archivedParam !== null && archivedParam !== 'true' && archivedParam !== 'false') {
-    return errorResponse('archived must be true or false.', 400);
-  }
-  const archivedOnly = archivedParam === 'true';
-  let query = auth.supabase
+  const { data, error } = await auth.supabase
     .from('applications')
     .select(READ_COLUMNS.applications)
     .order('created_at', { ascending: false });
-  query = archivedOnly ? query.not('archived_at', 'is', null) : query.is('archived_at', null);
-  const { data, error } = await query;
   if (error) return errorResponse(`Unable to read applications: ${error.message}`, 500);
   return json(data || []);
 };
@@ -2661,7 +2257,6 @@ const approveApplication = async (request: Request, env: Env): Promise<Response>
     .update({ joining_information: joiningInformation })
     .eq('id', applicationId)
     .eq('status', 'Pending')
-    .is('archived_at', null)
     .select('id')
     .maybeSingle();
   if (saveError) {
@@ -2784,54 +2379,6 @@ const approveApplication = async (request: Request, env: Env): Promise<Response>
   return approvalDelivery;
 };
 
-const recoverHistoricalOfficialDocument = async (request: Request, env: Env): Promise<Response> => {
-  const auth = await requireAdmin(request, env, 'super_admin');
-  if (isResponse(auth)) return auth;
-  const body = await parseJson(request);
-  if (isResponse(body)) return body;
-  const applicationId = requiredString(body.application_id, 'Application ID', 64);
-  if (isResponse(applicationId)) return applicationId;
-  if (!validId(applicationId)) return errorResponse('Application ID must be a valid UUID.', 400);
-
-  const { data: recoveryResult, error: recoveryError } = await auth.supabase.rpc(
-    'create_historical_official_document_version_one',
-    { p_application_id: applicationId },
-  );
-  if (recoveryError || !recoveryResult || typeof recoveryResult !== 'object' ||
-    !recoveryResult.issuance || typeof recoveryResult.issuance !== 'object') {
-    console.error('Historical official document recovery was refused or failed.', {
-      operation: 'official_document.historical_recovery.create',
-      error_code: recoveryError?.code || 'invalid_response',
-    });
-    return errorResponse(
-      recoveryError?.message || 'Historical Version 1 recovery could not be completed because the evidence was incomplete.',
-      recoveryError ? 409 : 500,
-    );
-  }
-
-  const issuance = recoveryResult.issuance as Record<string, any>;
-  const pdfBytes = await ensureIssuedOfficialPdf(
-    auth.supabase,
-    env,
-    issuance,
-    issuance.snapshot,
-    applicationId,
-  );
-  if (isResponse(pdfBytes)) return pdfBytes;
-
-  return json({
-    success: true,
-    created: recoveryResult.created === true,
-    email_sent: false,
-    issuance_id: issuance.id,
-    version_number: issuance.version_number,
-    status: 'ready',
-    message: recoveryResult.created === true
-      ? 'Historical Version 1 was recovered and stored without sending an approval email.'
-      : 'The existing historical Version 1 was reused without sending an approval email.',
-  });
-};
-
 const updateProfile = async (request: Request, env: Env, id: string): Promise<Response> => {
   const auth = await requireAdmin(request, env, 'super_admin');
   if (isResponse(auth)) return auth;
@@ -2854,71 +2401,6 @@ const updateProfile = async (request: Request, env: Env, id: string): Promise<Re
     .eq('id', id).select(READ_COLUMNS.profiles).maybeSingle();
   if (error) return errorResponse(`Failed to update admin profile: ${error.message}`, 500);
   return data ? json(data) : errorResponse('Admin profile not found.', 404);
-};
-
-const archiveApplication = async (request: Request, env: Env, id: string): Promise<Response> => {
-  const auth = await requireAdmin(request, env, 'admin');
-  if (isResponse(auth)) return auth;
-  const { data: existing, error: readError } = await auth.supabase
-    .from('applications')
-    .select('id,archived_at,archived_by')
-    .eq('id', id)
-    .maybeSingle();
-  if (readError) return errorResponse('Unable to load application for archiving.', 500);
-  if (!existing) return errorResponse('Application not found.', 404);
-  if (existing.archived_at) return json(existing);
-
-  const { data, error } = await auth.supabase
-    .from('applications')
-    .update({
-      archived_at: new Date().toISOString(),
-      archived_by: auth.profile.id,
-    })
-    .eq('id', id)
-    .is('archived_at', null)
-    .select('id,archived_at,archived_by')
-    .maybeSingle();
-  if (error) return errorResponse('Unable to archive application.', 500);
-  if (data) return json(data);
-
-  const { data: archived, error: archiveReadError } = await auth.supabase
-    .from('applications')
-    .select('id,archived_at,archived_by')
-    .eq('id', id)
-    .maybeSingle();
-  if (archiveReadError) return errorResponse('Unable to verify application archive status.', 500);
-  return archived ? json(archived) : errorResponse('Application not found.', 404);
-};
-
-const restoreApplication = async (request: Request, env: Env, id: string): Promise<Response> => {
-  const auth = await requireAdmin(request, env, 'admin');
-  if (isResponse(auth)) return auth;
-  const { data: existing, error: readError } = await auth.supabase
-    .from('applications')
-    .select('id,archived_at,archived_by')
-    .eq('id', id)
-    .maybeSingle();
-  if (readError) return errorResponse('Unable to load application for restoration.', 500);
-  if (!existing) return errorResponse('Application not found.', 404);
-  if (!existing.archived_at) return json(existing);
-
-  const { data, error } = await auth.supabase
-    .from('applications')
-    .update({ archived_at: null, archived_by: null })
-    .eq('id', id)
-    .not('archived_at', 'is', null)
-    .select('id,archived_at,archived_by')
-    .maybeSingle();
-  if (error) return errorResponse('Unable to restore application.', 500);
-  if (data) return json(data);
-
-  const { data: restored, error: restoreReadError } = await auth.supabase
-    .from('applications')
-    .select('id,archived_at,archived_by')
-    .eq('id', id)
-    .maybeSingle();
-  if (restoreReadError) return errorResponse('Unable to verify application restoration status.', 500);
-  return restored ? json(restored) : errorResponse('Application not found.', 404);
 };
 
 type ApplicationErasureJob = {
@@ -2988,25 +2470,14 @@ const deleteApplication = async (request: Request, env: Env, id: string): Promis
     return errorResponse('Type DELETE to confirm permanent application erasure.', 400);
   }
 
-  const { data: preservationReady, error: preservationError } = await auth.supabase.rpc(
-    'application_erasure_document_preservation_ready',
-  );
-  if (preservationError || preservationReady !== true) {
-    console.error('Application erasure is disabled because official-document preservation is not confirmed.', {
-      operation: 'admin.applications.delete.document_preservation_gate',
-      error_code: preservationError?.code || 'preservation_gate_unavailable',
-    });
-    return errorResponse(
-      'Permanent application erasure is unavailable until the official-document preservation migration is applied.',
-      503,
-    );
-  }
-
   const { data: started, error: startError } = await auth.supabase.rpc(
     'begin_application_erasure',
     { p_application_id: id, p_deleted_by: auth.profile.id },
   );
   if (startError) {
+    if (startError.message.includes('application_erasure_admin_required')) {
+      return errorResponse('Only active Admins and Super Admins can permanently delete applications.', 403);
+    }
     if (startError.message.includes('application_erasure_dependency_conflict')) {
       return errorResponse(
         'Deletion is blocked because application history contains a cross-application reference. No files or records were deleted.',
@@ -3016,12 +2487,6 @@ const deleteApplication = async (request: Request, env: Env, id: string): Promis
     if (startError.message.includes('application_erasure_photo_not_exclusive')) {
       return errorResponse(
         'The application photo cannot be verified as exclusive to this application. No files or records were deleted.',
-        409,
-      );
-    }
-    if (startError.message.includes('application_erasure_policy_not_approved')) {
-      return errorResponse(
-        'Permanent erasure is disabled until legal/accounting approval is recorded and R2 versioning and retention settings are verified in the database policy.',
         409,
       );
     }
@@ -3132,9 +2597,16 @@ const deleteApplication = async (request: Request, env: Env, id: string): Promis
 
   const { data: completed, error: completeError } = await auth.supabase.rpc(
     'complete_application_erasure',
-    { p_job_id: startedJob.job_id, p_verified_object_keys: verifiedKeys },
+    {
+      p_job_id: startedJob.job_id,
+      p_verified_object_keys: verifiedKeys,
+      p_actor_id: auth.profile.id,
+    },
   );
   if (completeError) {
+    if (completeError.message.includes('application_erasure_admin_required')) {
+      return errorResponse('Only active Admins and Super Admins can permanently delete applications.', 403);
+    }
     await recordApplicationErasureFailure(
       auth.supabase,
       startedJob.job_id,
@@ -3240,7 +2712,6 @@ const updateApplicationJoiningInformation = async (
     .update({ joining_information: joiningInformation })
     .eq('id', id)
     .eq('status', 'Pending')
-    .is('archived_at', null)
     .select(READ_COLUMNS.applications)
     .maybeSingle();
   if (error) {
@@ -3896,437 +3367,6 @@ const updateBranding = async (request: Request, env: Env): Promise<Response> => 
 
 const methodNotAllowed = (methods: string[]) => json({ error: 'Method not allowed for this API route.' }, 405, { Allow: methods.join(', ') });
 
-/*
-Manual Payment Register handler blueprint.
-Integrate these handlers into worker-api.ts, where the existing
-Env, requireAdmin, parseJson, validId, isResponse, json, and
-errorResponse helpers are available.
-*/
-
-type PaymentStage =
-  | 'first_payment'
-  | 'second_payment'
-  | 'installment'
-  | 'final_payment';
-
-type PaymentMethod =
-  | 'cash'
-  | 'upi'
-  | 'bank_transfer'
-  | 'card'
-  | 'cheque'
-  | 'other';
-
-const PAYMENT_METHODS: PaymentMethod[] = [
-  'cash', 'upi', 'bank_transfer', 'card', 'cheque', 'other',
-];
-
-const PAYMENT_STAGES: PaymentStage[] = [
-  'first_payment', 'second_payment', 'installment', 'final_payment',
-];
-
-const paymentAmount = (value: unknown): number | Response => {
-  if (
-    typeof value !== 'number' ||
-    !Number.isFinite(value) ||
-    value <= 0 ||
-    Math.abs(value * 100 - Math.round(value * 100)) > 1e-8
-  ) {
-    return errorResponse(
-      'Amount must be a positive number with at most two decimal places.',
-      400,
-    );
-  }
-  return value;
-};
-
-const paymentMethod = (value: unknown): PaymentMethod | Response => {
-  if (
-    typeof value !== 'string' ||
-    !PAYMENT_METHODS.includes(value as PaymentMethod)
-  ) {
-    return errorResponse('Invalid payment method.', 400);
-  }
-  return value as PaymentMethod;
-};
-
-const paymentStage = (value: unknown): PaymentStage | Response => {
-  if (
-    typeof value !== 'string' ||
-    !PAYMENT_STAGES.includes(value as PaymentStage)
-  ) {
-    return errorResponse('Invalid payment stage.', 400);
-  }
-  return value as PaymentStage;
-};
-
-const paymentApplicationExists = async (
-  supabase: SupabaseClient,
-  applicationId: string,
-) => supabase
-  .from('applications')
-  .select('id,application_reference,student_name,program_name,status')
-  .eq('id', applicationId)
-  .maybeSingle();
-
-const getApplicationPayments = async (
-  request: Request,
-  env: Env,
-  applicationId: string,
-): Promise<Response> => {
-  if (!validId(applicationId)) {
-    return errorResponse('Application ID must be a valid UUID.', 400);
-  }
-
-  const auth = await requireAdmin(request, env, 'staff');
-  if (isResponse(auth)) return auth;
-
-  const { data: application, error: appError } =
-    await paymentApplicationExists(auth.supabase, applicationId);
-
-  if (appError) {
-    return errorResponse('Unable to load the application.', 500);
-  }
-  if (!application) {
-    return errorResponse('Application not found.', 404);
-  }
-  if (application.status !== 'Accepted') {
-    return errorResponse('Payment records are available only for approved students.', 409);
-  }
-
-  const { data: payments, error: paymentsError } = await auth.supabase
-    .from('application_payments')
-    .select('id,application_id,application_reference,student_id,student_name,student_email,student_mobile,program_name,receipt_object_key,amount,payment_method,payment_stage,recorded_at,reference_number,notes,recorded_by,updated_by,created_at,updated_at')
-    .eq('application_id', applicationId)
-    .order('recorded_at', { ascending: false });
-
-  if (paymentsError) {
-    return errorResponse('Unable to load payment records.', 500);
-  }
-
-  const paymentRecords = payments || [];
-  const totalPaid = paymentRecords.reduce(
-    (sum, item) => sum + Number(item.amount),
-    0,
-  );
-
-  return json({
-    payments: paymentRecords,
-    totalPaid: Math.round(totalPaid * 100) / 100,
-  });
-};
-
-const getAdminPayments = async (request: Request, env: Env): Promise<Response> => {
-  const auth = await requireAdmin(request, env, 'admin');
-  if (isResponse(auth)) return auth;
-  const rawSearch = new URL(request.url).searchParams.get('search')?.trim() || '';
-  if (rawSearch.length > 100 || !/^[A-Za-z0-9 _.-]*$/.test(rawSearch)) {
-    return errorResponse('Payment search may contain only letters, numbers, spaces, periods, underscores, and hyphens.', 400);
-  }
-  let query = auth.supabase
-    .from('application_payments')
-    .select('id,application_id,application_reference,student_id,student_name,student_email,student_mobile,program_name,receipt_object_key,amount,payment_method,payment_stage,recorded_at,reference_number,notes,recorded_by,updated_by,created_at,updated_at')
-    .order('recorded_at', { ascending: false });
-  if (rawSearch) {
-    const pattern = `%${rawSearch}%`;
-    query = query.or([
-      `student_name.ilike.${pattern}`,
-      `application_reference.ilike.${pattern}`,
-      `student_id.ilike.${pattern}`,
-      `program_name.ilike.${pattern}`,
-      `reference_number.ilike.${pattern}`,
-    ].join(','));
-  }
-  const { data, error } = await query.limit(1000);
-  if (error) return errorResponse('Unable to load payment records.', 500);
-  const payments = data || [];
-  const totalPaid = Math.round(payments.reduce((sum, item) => sum + Number(item.amount), 0) * 100) / 100;
-  return json({ payments, totalPaid, truncated: payments.length === 1000 });
-};
-
-const createApplicationPayment = async (
-  request: Request,
-  env: Env,
-  applicationId: string,
-): Promise<Response> => {
-  if (!validId(applicationId)) {
-    return errorResponse('Application ID must be a valid UUID.', 400);
-  }
-
-  const auth = await requireAdmin(request, env, 'admin');
-  if (isResponse(auth)) return auth;
-
-  const idempotencyKey = request.headers.get('Idempotency-Key');
-  if (!idempotencyKey || !validId(idempotencyKey)) {
-    return errorResponse('A valid Idempotency-Key header is required to record a payment.', 400);
-  }
-
-  const body = await parseJson(request);
-  if (isResponse(body)) return body;
-
-  const amount = paymentAmount(body.amount);
-  if (isResponse(amount)) return amount;
-
-  const method = paymentMethod(body.payment_method);
-  if (isResponse(method)) return method;
-
-  const stage = paymentStage(body.payment_stage);
-  if (isResponse(stage)) return stage;
-
-  const reference = body.reference_number === undefined
-    ? null
-    : body.reference_number;
-  const notes = body.notes === undefined ? null : body.notes;
-
-  if (reference !== null && typeof reference !== 'string') {
-    return errorResponse('Reference number must be text.', 400);
-  }
-  if (notes !== null && typeof notes !== 'string') {
-    return errorResponse('Notes must be text.', 400);
-  }
-  if (
-    typeof reference === 'string' && reference.length > 200 ||
-    typeof notes === 'string' && notes.length > 2000
-  ) {
-    return errorResponse('Reference or notes exceed the allowed length.', 400);
-  }
-
-  const { data, error } = await auth.supabase.rpc(
-    'create_application_payment_idempotent',
-    {
-      p_application_id: applicationId,
-      p_actor: auth.profile.id,
-      p_amount: amount,
-      p_method: method,
-      p_stage: stage,
-      p_reference: reference,
-      p_notes: notes,
-      p_idempotency_key: idempotencyKey,
-    },
-  );
-
-  if (error) {
-    return errorResponse('Unable to record payment.', 400);
-  }
-
-  const savedPayment = data as Record<string, unknown> | null;
-  const paymentId = typeof savedPayment?.id === 'string' ? savedPayment.id : '';
-  const paymentTimestamp = typeof savedPayment?.updated_at === 'string'
-    ? savedPayment.updated_at
-    : typeof savedPayment?.created_at === 'string' ? savedPayment.created_at : '';
-  const issuanceId = paymentId
-    ? await enqueuePaymentDocumentVersion(
-      auth.supabase,
-      applicationId,
-      `payment:${paymentId}:created${paymentTimestamp ? `:${paymentTimestamp}` : ''}`,
-    )
-    : null;
-  const documentUpdate = issuanceId
-    ? await processPaymentDocumentIssuance(auth.supabase, env, issuanceId)
-    : { success: false, status: 'failed', error: 'Payment was saved, but its PDF version could not be created.' };
-  return json({ payment: data, document_update: documentUpdate }, 201);
-};
-
-const updateApplicationPayment = async (
-  request: Request,
-  env: Env,
-  paymentId: string,
-): Promise<Response> => {
-  if (!validId(paymentId)) {
-    return errorResponse('Payment ID must be a valid UUID.', 400);
-  }
-
-  const auth = await requireAdmin(request, env, 'admin');
-  if (isResponse(auth)) return auth;
-
-  const body = await parseJson(request);
-  if (isResponse(body)) return body;
-
-  const amount = paymentAmount(body.amount);
-  if (isResponse(amount)) return amount;
-
-  const method = paymentMethod(body.payment_method);
-  if (isResponse(method)) return method;
-
-  const stage = paymentStage(body.payment_stage);
-  if (isResponse(stage)) return stage;
-
-  const reference = body.reference_number === undefined
-    ? null
-    : body.reference_number;
-  const notes = body.notes === undefined ? null : body.notes;
-
-  if (reference !== null && typeof reference !== 'string') {
-    return errorResponse('Reference number must be text.', 400);
-  }
-  if (notes !== null && typeof notes !== 'string') {
-    return errorResponse('Notes must be text.', 400);
-  }
-  if (
-    typeof reference === 'string' && reference.length > 200 ||
-    typeof notes === 'string' && notes.length > 2000
-  ) {
-    return errorResponse('Reference or notes exceed the allowed length.', 400);
-  }
-
-  const { data, error } = await auth.supabase.rpc(
-    'update_application_payment',
-    {
-      p_payment_id: paymentId,
-      p_actor: auth.profile.id,
-      p_amount: amount,
-      p_method: method,
-      p_stage: stage,
-      p_reference: reference,
-      p_notes: notes,
-    },
-  );
-
-  if (error) {
-    return errorResponse('Unable to update payment.', 400);
-  }
-
-  const updatedPayment = data as Record<string, unknown> | null;
-  const applicationId = typeof updatedPayment?.application_id === 'string' ? updatedPayment.application_id : '';
-  if (!applicationId) {
-    return json({
-      payment: data,
-      document_update: { success: true, status: 'not_applicable' },
-    });
-  }
-  const paymentTimestamp = typeof updatedPayment?.updated_at === 'string' ? updatedPayment.updated_at : '';
-  const issuanceId = updatedPayment?.id
-    ? await enqueuePaymentDocumentVersion(
-      auth.supabase,
-      applicationId,
-      `payment:${String(updatedPayment.id)}:updated${paymentTimestamp ? `:${paymentTimestamp}` : ''}`,
-    )
-    : null;
-  const documentUpdate = issuanceId
-    ? await processPaymentDocumentIssuance(auth.supabase, env, issuanceId)
-    : { success: false, status: 'failed', error: 'Payment was saved, but its PDF version could not be created.' };
-  return json({ payment: data, document_update: documentUpdate });
-};
-
-const deleteApplicationPayment = async (
-  request: Request,
-  env: Env,
-  paymentId: string,
-): Promise<Response> => {
-  if (!validId(paymentId)) {
-    return errorResponse('Payment ID must be a valid UUID.', 400);
-  }
-
-  const auth = await requireAdmin(request, env, 'admin');
-  if (isResponse(auth)) return auth;
-
-  const { data, error } = await auth.supabase.rpc(
-    'delete_application_payment',
-    {
-      p_payment_id: paymentId,
-      p_actor: auth.profile.id,
-    },
-  );
-
-  if (error) {
-    return errorResponse('Unable to delete payment.', 400);
-  }
-
-  const deletedPayment = data as Record<string, unknown> | null;
-  const applicationId = typeof deletedPayment?.application_id === 'string' ? deletedPayment.application_id : '';
-  if (!applicationId) return json({ result: data });
-  const deletedPaymentId = typeof deletedPayment?.payment_id === 'string' ? deletedPayment.payment_id : paymentId;
-  const issuanceId = await enqueuePaymentDocumentVersion(
-    auth.supabase,
-    applicationId,
-    `payment:${deletedPaymentId}:deleted`,
-  );
-  const documentUpdate = issuanceId
-    ? await processPaymentDocumentIssuance(auth.supabase, env, issuanceId)
-    : { success: false, status: 'failed', error: 'Payment was deleted, but its document update could not be created.' };
-  return json({ result: data, document_update: documentUpdate });
-};
-
-const generatePaymentReceipt = async (
-  request: Request,
-  env: Env,
-  paymentId: string,
-): Promise<Response> => {
-  const auth = await requireAdmin(request, env, 'staff');
-  if (isResponse(auth)) return auth;
-  const receipt = await ensurePaymentReceiptPdf(auth.supabase, env, paymentId);
-  if (isResponse(receipt)) return receipt;
-  return json({
-    success: true,
-    status: 'ready',
-    payment_id: paymentId,
-    receipt_url: `/api/admin/payments/${paymentId}/receipt/file`,
-  });
-};
-
-const downloadPaymentReceipt = async (
-  request: Request,
-  env: Env,
-  paymentId: string,
-): Promise<Response> => {
-  const auth = await requireAdmin(request, env, 'staff');
-  if (isResponse(auth)) return auth;
-  const receipt = await ensurePaymentReceiptPdf(auth.supabase, env, paymentId);
-  if (isResponse(receipt)) return receipt;
-  return responseWithPdf(
-    receipt.bytes,
-    `Payment_Receipt_${paymentId}.pdf`,
-    'attachment',
-  );
-};
-
-const emailPaymentReceipt = async (
-  request: Request,
-  env: Env,
-  paymentId: string,
-): Promise<Response> => {
-  const auth = await requireAdmin(request, env, 'staff');
-  if (isResponse(auth)) return auth;
-  const receipt = await ensurePaymentReceiptPdf(auth.supabase, env, paymentId);
-  if (isResponse(receipt)) return receipt;
-  const email = typeof receipt.context.application.email === 'string'
-    ? receipt.context.application.email.trim()
-    : '';
-  if (!email) return errorResponse('The retained payment has no student email address.', 422);
-  const reference = String(receipt.context.application.application_reference || paymentId)
-    .replace(/[^A-Za-z0-9_-]/g, '_');
-  const sendReceiptEmail = async () => {
-      const emailResult = await sendEmail(env, {
-        to: email,
-        subject: `Payment receipt — ${receipt.context.application.application_reference}`,
-        content: {
-          title: 'Payment Receipt',
-          greeting: receipt.context.application.student_name,
-          paragraphs: ['Please find your payment receipt attached.'],
-          details: [{
-            label: 'Application Reference',
-            value: receipt.context.application.application_reference,
-          }],
-        },
-        attachments: [{ filename: `Payment_Receipt_${reference}.pdf`, content: toBase64(receipt.bytes) }],
-        idempotencyKey: `payment-receipt-v2-${paymentId}`,
-      });
-      if (!emailResult.success) {
-        return errorResponse(emailResult.error || 'The payment receipt email could not be sent.', 502);
-      }
-      return json({ success: true, status: 'sent' });
-  };
-  const result = receipt.context.application.id
-    ? await withApplicationErasureWriteLease(
-      auth.supabase,
-      String(receipt.context.application.id),
-      sendReceiptEmail,
-    )
-    : await sendReceiptEmail();
-  return isResponse(result) ? result : errorResponse('The payment receipt email result is invalid.', 500);
-};
-
-
 export async function handleApiRequest(request: Request, env: Env): Promise<Response> {
   const { pathname } = new URL(request.url);
   const method = request.method.toUpperCase();
@@ -4432,7 +3472,6 @@ export async function handleApiRequest(request: Request, env: Env): Promise<Resp
       if (method === 'POST') return createMedia(request, env);
       return methodNotAllowed(['GET', 'POST']);
     }
-
     const applicationErasureJobRoute = pathname.match(
       /^\/api\/admin\/application-erasure-jobs\/([^/]+)$/,
     );
@@ -4446,58 +3485,6 @@ export async function handleApiRequest(request: Request, env: Env): Promise<Resp
       return methodNotAllowed(['GET']);
     }
 
-    // Manual Payment Register routes; independent of application approval.
-    const applicationPaymentRoute = pathname.match(
-      /^\/api\/admin\/applications\/([^/]+)\/payments$/
-    );
-    if (applicationPaymentRoute) {
-      let applicationId: string;
-      try {
-        applicationId = decodeURIComponent(applicationPaymentRoute[1]);
-      } catch {
-        return errorResponse('Invalid application ID.', 400);
-      }
-      if (!validId(applicationId)) {
-        return errorResponse('Application ID must be a valid UUID.', 400);
-      }
-
-      if (method === 'GET') return getApplicationPayments(request, env, applicationId);
-      if (method === 'POST') return createApplicationPayment(request, env, applicationId);
-      return methodNotAllowed(['GET', 'POST']);
-    }
-
-    const paymentIdRoute = pathname.match(/^\/api\/admin\/payments\/([^/]+)$/);
-    if (paymentIdRoute) {
-      let paymentId: string;
-      try {
-        paymentId = decodeURIComponent(paymentIdRoute[1]);
-      } catch {
-        return errorResponse('Invalid payment ID.', 400);
-      }
-      if (!validId(paymentId)) {
-        return errorResponse('Payment ID must be a valid UUID.', 400);
-      }
-      if (method === 'PUT') return updateApplicationPayment(request, env, paymentId);
-      if (method === 'DELETE') return deleteApplicationPayment(request, env, paymentId);
-      return methodNotAllowed(['PUT', 'DELETE']);
-    }
-
-    const paymentReceiptRoute = pathname.match(/^\/api\/admin\/payments\/([^/]+)\/receipt(?:\/(file|email))?$/);
-    if (paymentReceiptRoute) {
-      let paymentId: string;
-      try {
-        paymentId = decodeURIComponent(paymentReceiptRoute[1]);
-      } catch {
-        return errorResponse('Invalid payment ID.', 400);
-      }
-      if (!validId(paymentId)) return errorResponse('Payment ID must be a valid UUID.', 400);
-      const action = paymentReceiptRoute[2] || 'generate';
-      if (action === 'generate' && method === 'POST') return generatePaymentReceipt(request, env, paymentId);
-      if (action === 'file' && method === 'GET') return downloadPaymentReceipt(request, env, paymentId);
-      if (action === 'email' && method === 'POST') return emailPaymentReceipt(request, env, paymentId);
-      return methodNotAllowed([action === 'file' ? 'GET' : 'POST']);
-    }
-
     const demoPhotoRoute = pathname.match(/^\/api\/admin\/demo-class-requests\/([^/]+)\/photo$/);
     if (demoPhotoRoute) {
       let requestId: string;
@@ -4507,28 +3494,6 @@ export async function handleApiRequest(request: Request, env: Env): Promise<Resp
       if (!validId(requestId)) return errorResponse('Demo class request ID must be a valid UUID.', 400);
       if (method === 'GET') return getDemoClassRequestPhoto(request, env, requestId);
       return methodNotAllowed(['GET']);
-    }
-
-    const applicationArchiveRoute = pathname.match(/^\/api\/admin\/applications\/([^/]+)\/archive$/);
-    if (applicationArchiveRoute) {
-      let applicationId: string;
-      try { applicationId = decodeURIComponent(applicationArchiveRoute[1]); } catch {
-        return errorResponse('Invalid application ID.', 400);
-      }
-      if (!validId(applicationId)) return errorResponse('Application ID must be a valid UUID.', 400);
-      if (method === 'POST') return archiveApplication(request, env, applicationId);
-      return methodNotAllowed(['POST']);
-    }
-
-    const applicationRestoreRoute = pathname.match(/^\/api\/admin\/applications\/([^/]+)\/restore$/);
-    if (applicationRestoreRoute) {
-      let applicationId: string;
-      try { applicationId = decodeURIComponent(applicationRestoreRoute[1]); } catch {
-        return errorResponse('Invalid application ID.', 400);
-      }
-      if (!validId(applicationId)) return errorResponse('Application ID must be a valid UUID.', 400);
-      if (method === 'POST') return restoreApplication(request, env, applicationId);
-      return methodNotAllowed(['POST']);
     }
 
     const applicationJoiningInformationRoute = pathname.match(
@@ -4597,10 +3562,6 @@ export async function handleApiRequest(request: Request, env: Env): Promise<Resp
     }
 
     if (pathname === '/api/admin/applications' && method === 'GET') return getAdminApplications(request, env);
-    if (pathname === '/api/admin/payments') {
-      if (method === 'GET') return getAdminPayments(request, env);
-      return methodNotAllowed(['GET']);
-    }
     if (pathname === '/api/admin/demo-class-requests' && method === 'GET') return adminTable(request, env, 'demo_class_requests', READ_COLUMNS.demoClassRequests, 'created_at');
     if (pathname === '/api/admin/notifications' && method === 'GET') return adminTable(request, env, 'application_notifications', READ_COLUMNS.notifications, 'created_at', false, 'super_admin');
     if (pathname === '/api/admin/callbacks' && method === 'GET') return adminTable(request, env, 'callback_requests', READ_COLUMNS.callbacks, 'created_at');
@@ -4615,9 +3576,6 @@ export async function handleApiRequest(request: Request, env: Env): Promise<Resp
     if (pathname === '/api/admin/official-document/preview') {
       if (method === 'POST') return previewOfficialDocument(request, env);
       return methodNotAllowed(['POST']);
-    }
-    if (pathname === '/api/admin/official-document/historical-recovery' && method === 'POST') {
-      return recoverHistoricalOfficialDocument(request, env);
     }
     if (pathname === '/api/admin/official-document/versions') {
       if (method === 'GET') return getOfficialDocumentVersions(request, env);

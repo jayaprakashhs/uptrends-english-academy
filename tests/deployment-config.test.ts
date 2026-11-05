@@ -5,6 +5,7 @@ import test from 'node:test';
 const viteConfig = await readFile(new URL('../vite.config.ts', import.meta.url), 'utf8');
 const workerSource = await readFile(new URL('../worker.ts', import.meta.url), 'utf8');
 const workerApiSource = await readFile(new URL('../worker-api.ts', import.meta.url), 'utf8');
+const serverSource = await readFile(new URL('../server.ts', import.meta.url), 'utf8');
 const sitemap = await readFile(new URL('../public/sitemap.xml', import.meta.url), 'utf8');
 const robots = await readFile(new URL('../public/robots.txt', import.meta.url), 'utf8');
 const packageJson = JSON.parse(
@@ -32,7 +33,9 @@ test('deploy script uses the Wrangler config actually emitted by Vite', () => {
   assert.match(viteConfig, /dist\/uptrends_english_academy\/\.dev\.vars/);
   assert.doesNotMatch(workerSource, /scheduled\(/);
   assert.doesNotMatch(workerApiSource, /runPaymentDocumentRecovery|reconcile_payment_document_versions/);
-  assert.match(workerApiSource, /`payment:\$\{deletedPaymentId\}:deleted`/);
+  assert.doesNotMatch(workerApiSource, /\/api\/admin\/payments|\/payments|application_payments/);
+  assert.doesNotMatch(serverSource, /\/api\/admin\/payments|\/payments/);
+  assert.match(serverSource, /app\.all\('\/api\/\*'/);
 });
 
 test('public SEO files list only the canonical public homepage and identify the sitemap', () => {
