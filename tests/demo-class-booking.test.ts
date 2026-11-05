@@ -217,7 +217,10 @@ test('stores demo requests separately and sends independent applicant and academ
     assert.equal(databaseRequests.filter(({ url }) => url.includes('/rest/v1/site_branding?')).length, 2);
     for (const email of emailMessages) {
       assert.match(email.html, /src="https:\/\/assets\.example\/branding\/current-logo\.png"/);
-      assert.match(email.html, /alt="Uptrend's English Academy"/);
+      assert.match(email.html, /alt="Uptrend&#39;s English Academy logo"/);
+      assert.match(email.html, /Visit the academy website/);
+      assert.match(email.html, /ACADEMY NOTIFICATION/);
+      assert.doesNotMatch(email.html, /bimi-logo\.svg/);
       assert.match(email.html, /Davangere, Karnataka, India/);
       assert.ok(email.text.length > 0);
     }
