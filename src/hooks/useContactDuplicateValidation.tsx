@@ -9,7 +9,6 @@ import {
 export interface ContactCheckState {
   value: string;
   checking: boolean;
-  duplicate: boolean;
   error: string | null;
 }
 
@@ -20,7 +19,6 @@ interface ContactCheckResult {
 const emptyState: ContactCheckState = {
   value: '',
   checking: false,
-  duplicate: false,
   error: null,
 };
 
@@ -36,11 +34,11 @@ export const useContactDuplicateValidation = (email: string, mobile: string, ena
     }
     if (!isValidContactEmail(normalized)) {
       const error = 'Enter a valid email address.';
-      setEmailCheck({ value: normalized, checking: false, duplicate: false, error });
+      setEmailCheck({ value: normalized, checking: false, error });
       return { error };
     }
 
-    setEmailCheck({ value: normalized, checking: false, duplicate: false, error: null });
+    setEmailCheck({ value: normalized, checking: false, error: null });
     return { error: null };
   }, [enabled]);
 
@@ -53,12 +51,12 @@ export const useContactDuplicateValidation = (email: string, mobile: string, ena
     if (!normalized) {
       const error = value.trim() ? 'Enter a valid Indian mobile number.' : null;
       setMobileCheck(error
-        ? { value: value.trim(), checking: false, duplicate: false, error }
+        ? { value: value.trim(), checking: false, error }
         : emptyState);
       return { error };
     }
 
-    setMobileCheck({ value: normalized, checking: false, duplicate: false, error: null });
+    setMobileCheck({ value: normalized, checking: false, error: null });
     return { error: null };
   }, [enabled]);
 

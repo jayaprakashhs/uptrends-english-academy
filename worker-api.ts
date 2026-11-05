@@ -468,38 +468,6 @@ const contactAcknowledgement = () => json({
   message: 'We received your request. If it can be processed, the academy will contact you.',
 }, 202);
 
-const duplicateContactResponse = () => errorResponse('A request using this email or mobile already exists for this form.', 409);
-
-const isDuplicateContactError = (
-  error: { code?: string; message?: string } | null | undefined,
-): boolean => error?.code === '23505' && error.message === 'duplicate_contact';
-
-const checkContactDuplicates = async (
-  supabase: SupabaseClient,
-  sourceTable: 'applications' | 'demo_class_requests' | 'callback_requests',
-  email: string | null,
-  mobile: string | null,
-): Promise<boolean | Response> => {
-  try {
-    const { data, error } = await supabase.rpc('check_application_contact_duplicate', {
-      p_source_table: sourceTable,
-      p_email: email,
-      p_mobile: mobile,
-    });
-    if (!error && typeof data === 'boolean') return data;
-    console.error('Unable to verify submitted contact information.', {
-      operation: 'application_contact_duplicate_check',
-      error_code: error?.code || 'invalid_response',
-    });
-  } catch {
-    console.error('Unable to verify submitted contact information.', {
-      operation: 'application_contact_duplicate_check',
-      error_code: 'request_failed',
-    });
-  }
-  return errorResponse('Contact verification is temporarily unavailable. Please try again.', 503);
-};
-
 const decodeImage = (
   value: unknown,
   maxBytes: number,
@@ -2104,9 +2072,6 @@ const submitDemoClassRequest = async (request: Request, env: Env): Promise<Respo
   if (!requestRecord.mobile || !isValidContactEmail(requestRecord.email)) {
     return errorResponse('Enter a valid email address and Indian mobile number.', 400);
   }
-  const duplicate = await checkContactDuplicates(supabase, 'demo_class_requests', requestRecord.email, requestRecord.mobile);
-  if (isResponse(duplicate)) return duplicate;
-  if (duplicate) return duplicateContactResponse();
 
   const { data: saved, error: insertError } = await supabase
     .from('demo_class_requests')
@@ -2116,9 +2081,7 @@ const submitDemoClassRequest = async (request: Request, env: Env): Promise<Respo
     })
     .select('id')
     .single();
-
   if (insertError || !saved) {
-    if (insertError && isDuplicateContactError(insertError)) return duplicateContactResponse();
     return errorResponse('Unable to save the demo class request. Please try again.', 500);
   }
 
@@ -2194,16 +2157,12 @@ const submitCallback = async (request: Request, env: Env): Promise<Response> => 
     consent: true,
     status: 'Pending',
   };
-  const duplicate = await checkContactDuplicates(supabase, 'callback_requests', record.email, record.mobile);
-  if (isResponse(duplicate)) return duplicate;
-  if (duplicate) return duplicateContactResponse();
   const { data: saved, error } = await supabase
     .from('callback_requests')
     .insert(record)
     .select('id')
     .single();
   if (error || !saved) {
-    if (isDuplicateContactError(error)) return duplicateContactResponse();
     return errorResponse('Failed to record callback request. Please try again.', 500);
   }
 

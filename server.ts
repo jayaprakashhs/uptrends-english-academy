@@ -51,35 +51,10 @@ export const supabase = (SUPABASE_URL && SUPABASE_SERVICE_KEY)
     })
   : null;
 
-const checkContactDuplicates = async (
-  email: string | null,
-  mobile: string | null,
-): Promise<boolean> => {
-  if (!supabase) throw new Error('Contact verification is temporarily unavailable. Please try again.');
-  const { data, error } = await supabase.rpc('check_application_contact_duplicate', {
-    p_email: email,
-    p_mobile: mobile,
-  });
-  if (error || typeof data !== 'boolean') {
-    console.error('Unable to verify submitted contact information.', {
-      operation: 'application_contact_duplicate_check',
-      error_code: error?.code || 'invalid_response',
-    });
-    throw new Error('Contact verification is temporarily unavailable. Please try again.');
-  }
-  return data;
-};
-
-const isDuplicateContactError = (error: { code?: string; message?: string }): boolean =>
-  error.code === '23505' && error.message === 'duplicate_contact';
-
 const contactAcknowledgement = {
   success: true,
   message: 'We received your request. If it can be processed, the academy will contact you.',
 };
-
-const sendDuplicateContactResponse = (res: express.Response) =>
-  res.status(202).json(contactAcknowledgement);
 
 // Initialize Resend if key exists
 const resend = RESEND_API_KEY ? new Resend(RESEND_API_KEY) : null;
@@ -1528,16 +1503,6 @@ app.post('/api/callback-request', async (req, res) => {
     if (!normalizedMobile || (normalizedEmail && !isValidContactEmail(normalizedEmail))) {
       return res.status(400).json({ error: 'Enter a valid email address and Indian mobile number.' });
     }
-    let duplicateContact: boolean;
-    try {
-      duplicateContact = await checkContactDuplicates(normalizedEmail, normalizedMobile);
-    } catch (validationError) {
-      return res.status(503).json({
-        error: validationError instanceof Error ? validationError.message : 'Contact verification is temporarily unavailable.',
-      });
-    }
-    if (duplicateContact) return sendDuplicateContactResponse(res);
-
     const newRecord = {
       id: crypto.randomUUID(),
       full_name,
@@ -1554,7 +1519,6 @@ app.post('/api/callback-request', async (req, res) => {
     if (supabase) {
       const { error } = await supabase.from('callback_requests').insert([newRecord]);
       if (error) {
-        if (isDuplicateContactError(error)) return sendDuplicateContactResponse(res);
         console.error('[Supabase Insert Callback Error]', { code: error.code || 'unknown' });
         return res.status(500).json({ error: 'Failed to record callback request. Please retry.' });
       }

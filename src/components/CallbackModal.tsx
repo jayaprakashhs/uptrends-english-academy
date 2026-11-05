@@ -175,10 +175,10 @@ export const CallbackModal: React.FC<CallbackModalProps> = ({
                     value={mobile}
                     onChange={(e) => setMobile(e.target.value)}
                     onBlur={() => void contactValidation.validateMobile(mobile)}
-                    aria-invalid={contactValidation.mobileCheck.duplicate || Boolean(contactValidation.mobileCheck.error)}
+                    aria-invalid={Boolean(contactValidation.mobileCheck.error)}
                     aria-describedby="callback-mobile-validation"
                     placeholder="+91 98765 43210"
-                    className={`w-full px-3.5 py-2.5 rounded-lg border focus:outline-hidden focus:ring-2 focus:ring-orange-500 text-sm ${contactValidation.mobileCheck.duplicate || contactValidation.mobileCheck.error ? 'border-rose-600' : 'border-slate-300'}`}
+                    className={`w-full px-3.5 py-2.5 rounded-lg border focus:outline-hidden focus:ring-2 focus:ring-orange-500 text-sm ${contactValidation.mobileCheck.error ? 'border-rose-600' : 'border-slate-300'}`}
                   />
                   <ContactValidationMessage id="callback-mobile-validation" state={contactValidation.mobileCheck} />
                 </div>
@@ -192,10 +192,10 @@ export const CallbackModal: React.FC<CallbackModalProps> = ({
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     onBlur={() => void contactValidation.validateEmail(email)}
-                    aria-invalid={contactValidation.emailCheck.duplicate || Boolean(contactValidation.emailCheck.error)}
+                    aria-invalid={Boolean(contactValidation.emailCheck.error)}
                     aria-describedby="callback-email-validation"
                     placeholder="student@example.com"
-                    className={`w-full px-3.5 py-2.5 rounded-lg border focus:outline-hidden focus:ring-2 focus:ring-orange-500 text-sm ${contactValidation.emailCheck.duplicate || contactValidation.emailCheck.error ? 'border-rose-600' : 'border-slate-300'}`}
+                    className={`w-full px-3.5 py-2.5 rounded-lg border focus:outline-hidden focus:ring-2 focus:ring-orange-500 text-sm ${contactValidation.emailCheck.error ? 'border-rose-600' : 'border-slate-300'}`}
                   />
                   <ContactValidationMessage id="callback-email-validation" state={contactValidation.emailCheck} />
                 </div>
@@ -268,7 +268,7 @@ export const CallbackModal: React.FC<CallbackModalProps> = ({
               <div className="pt-2">
                 <button
                   type="submit"
-                  disabled={loading || contactValidation.emailCheck.duplicate || contactValidation.mobileCheck.duplicate || contactValidation.emailCheck.checking || contactValidation.mobileCheck.checking}
+                  disabled={loading || contactValidation.emailCheck.checking || contactValidation.mobileCheck.checking}
                   className="form-submit-button w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-orange-600 hover:bg-orange-700 text-white font-bold text-sm shadow-md transition-all disabled:opacity-50 cursor-pointer"
                 >
                   {loading ? (

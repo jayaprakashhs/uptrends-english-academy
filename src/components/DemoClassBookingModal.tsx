@@ -183,12 +183,12 @@ export const DemoClassBookingModal: React.FC<DemoClassBookingModalProps> = ({ is
               </label>
               <label className="text-xs font-bold text-slate-700">
                 Mobile Number *
-                <input name="mobile" type="tel" value={form.mobile} onChange={updateForm} onBlur={() => void contactValidation.validateMobile(form.mobile)} aria-invalid={contactValidation.mobileCheck.duplicate || Boolean(contactValidation.mobileCheck.error)} aria-describedby="demo-mobile-validation" required maxLength={30} autoComplete="tel" placeholder="+91 90000 00000" className={`${inputClassName} ${contactValidation.mobileCheck.duplicate || contactValidation.mobileCheck.error ? 'border-rose-600' : ''}`} />
+                <input name="mobile" type="tel" value={form.mobile} onChange={updateForm} onBlur={() => void contactValidation.validateMobile(form.mobile)} aria-invalid={Boolean(contactValidation.mobileCheck.error)} aria-describedby="demo-mobile-validation" required maxLength={30} autoComplete="tel" placeholder="+91 90000 00000" className={`${inputClassName} ${contactValidation.mobileCheck.error ? 'border-rose-600' : ''}`} />
                 <ContactValidationMessage id="demo-mobile-validation" state={contactValidation.mobileCheck} />
               </label>
               <label className="text-xs font-bold text-slate-700">
                 Email ID *
-                <input name="email" type="email" value={form.email} onChange={updateForm} onBlur={() => void contactValidation.validateEmail(form.email)} aria-invalid={contactValidation.emailCheck.duplicate || Boolean(contactValidation.emailCheck.error)} aria-describedby="demo-email-validation" required maxLength={320} autoComplete="email" className={`${inputClassName} ${contactValidation.emailCheck.duplicate || contactValidation.emailCheck.error ? 'border-rose-600' : ''}`} />
+                <input name="email" type="email" value={form.email} onChange={updateForm} onBlur={() => void contactValidation.validateEmail(form.email)} aria-invalid={Boolean(contactValidation.emailCheck.error)} aria-describedby="demo-email-validation" required maxLength={320} autoComplete="email" className={`${inputClassName} ${contactValidation.emailCheck.error ? 'border-rose-600' : ''}`} />
                 <ContactValidationMessage id="demo-email-validation" state={contactValidation.emailCheck} />
               </label>
               <div className="text-xs font-bold text-slate-700">
