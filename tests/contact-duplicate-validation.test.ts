@@ -194,23 +194,8 @@ test('contact submissions fail closed when the protected database validation RPC
   }
 });
 
-test('direct submissions to all three APIs cannot bypass same-form duplicate checks', async () => {
+test('direct demo and callback submissions cannot bypass same-form duplicate checks', async () => {
   const submissions = [
-    {
-      path: '/api/apply',
-      body: {
-        student_name: 'Applicant',
-        mobile: '9876543210',
-        email: 'taken@example.com',
-        qualification_category: 'Graduate',
-        qualification: 'Graduate',
-        college_name: 'Example College',
-        place: 'Vijayanagar',
-        city: 'Davangere',
-        program_name: 'Spoken English',
-        privacy_consent: true,
-      },
-    },
     {
       path: '/api/demo-class-requests',
       body: {
@@ -237,11 +222,9 @@ test('direct submissions to all three APIs cannot bypass same-form duplicate che
     },
   ];
   for (const submission of submissions) {
-    const table = submission.path === '/api/apply'
-      ? 'applications'
-      : submission.path === '/api/demo-class-requests'
-        ? 'demo_class_requests'
-        : 'callback_requests';
+    const table = submission.path === '/api/demo-class-requests'
+      ? 'demo_class_requests'
+      : 'callback_requests';
     const backend = setupContactBackend({ [table]: [contactRecord('taken@example.com', '9876543210')] });
     try {
       const response = await handleApiRequest(new Request(`https://academy.example${submission.path}`, {
@@ -255,36 +238,6 @@ test('direct submissions to all three APIs cannot bypass same-form duplicate che
     } finally {
       backend.restore();
     }
-  }
-});
-
-test('Student application duplicate checks use parent contacts when applicant contacts are omitted', async () => {
-  const backend = setupContactBackend({
-    applications: [contactRecord('parent@example.com', '+91 98765 43210')],
-  });
-  try {
-    const response = await handleApiRequest(new Request('https://academy.example/api/apply', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        student_name: 'Student Applicant',
-        qualification_category: 'Student',
-        qualification: '10th Standard',
-        parent_phone: '+91 98765 43210',
-        parent_email: 'Parent@Example.com',
-        school_name: 'Example School',
-        place: 'Vijayanagar',
-        city: 'Davangere',
-        program_name: 'Spoken English',
-        privacy_consent: true,
-        photo_base64: 'data:image/jpeg;base64,/9j/2Q==',
-      }),
-    }), env);
-
-    assert.equal(response.status, 409);
-    assert.match((await response.json() as { error: string }).error, /already exists for this form/i);
-  } finally {
-    backend.restore();
   }
 });
 
@@ -320,6 +273,14 @@ test('contact registry migration keeps normalized per-form uniqueness without de
     new URL('../supabase/migrations/20261031000001_scope_contact_registry_per_form.sql', import.meta.url),
     'utf8',
   );
+  const repeatApplicationMigration = await readFile(
+    new URL('../supabase/migrations/20261105000002_allow_multiple_applications_per_contact.sql', import.meta.url),
+    'utf8',
+  );
+  const identifierMigration = await readFile(
+    new URL('../supabase/migrations/20261030000007_dynamic_official_documents_and_course_fees.sql', import.meta.url),
+    'utf8',
+  );
   for (const table of ['applications', 'callback_requests']) {
     const definition = coreSchema.match(new RegExp(`CREATE TABLE IF NOT EXISTS public\\.${table} \\(([\\s\\S]*?)\\n\\);`))?.[1];
     assert.ok(definition, `${table} schema exists`);
@@ -340,4 +301,12 @@ test('contact registry migration keeps normalized per-form uniqueness without de
   assert.match(scopeMigration, /ON public\.application_contact_registry \(source_table, normalized_mobile\)/);
   assert.match(scopeMigration, /source_table = p_source_table/);
   assert.doesNotMatch(scopeMigration, /DELETE\s+FROM\s+public\.application_contact_registry/i);
+  assert.match(repeatApplicationMigration, /WHERE source_table IN \('callback_requests', 'demo_class_requests'\)/);
+  assert.match(repeatApplicationMigration, /IF p_source_table = 'applications' THEN\s+RETURN false;/);
+  assert.match(repeatApplicationMigration, /GRANT EXECUTE ON FUNCTION public\.check_application_contact_duplicate[\s\S]*TO service_role/);
+  assert.doesNotMatch(repeatApplicationMigration, /DELETE\s+FROM\s+public\.(applications|callback_requests|demo_class_requests|application_contact_registry)/i);
+  assert.match(identifierMigration, /NEW\.application_reference := public\.next_academy_identifier\('APP', v_year\)/);
+  assert.match(identifierMigration, /NEW\.student_id := NULL/);
+  assert.match(identifierMigration, /NEW\.student_id := public\.next_academy_identifier\('STU', v_year\)/);
+  assert.match(identifierMigration, /CREATE UNIQUE INDEX IF NOT EXISTS idx_applications_student_id_unique/);
 });

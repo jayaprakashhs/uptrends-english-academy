@@ -65,28 +65,27 @@ The existing `APPLICATION_NOTIFICATION_EMAIL`, `RESEND_API_KEY`, and
 `RESEND_FROM_EMAIL` settings are used for demo-request email notifications. No
 new environment variables are required.
 
-## 2.2. Cross-Table Duplicate Contact Validation
+## 2.2. Contact Validation and Request Uniqueness
 
 The migration
 `supabase/migrations/20261030000006_prevent_duplicate_application_contacts.sql`
 adds a private contact registry and database triggers for `applications`,
-`callback_requests`, and `demo_class_requests`. Normalized email and Indian
-mobile values have unique constraints in the registry, so simultaneous
-submissions are serialized by PostgreSQL. The protected
+`callback_requests`, and `demo_class_requests`. The protected
 `check_application_contact_duplicate` RPC is available only to `service_role`;
 it is called only by trusted server-side submission handlers. There is no
-public contact-preflight endpoint. Public forms receive the same generic
-acknowledgement for accepted and duplicate contacts, while duplicate records
-are rejected by the server and database constraints. This avoids direct
-duplicate-status disclosure; response timing is not guaranteed to be
-indistinguishable.
+public contact-preflight endpoint. After applying
+`supabase/migrations/20261105000002_allow_multiple_applications_per_contact.sql`,
+applications may reuse normalized email addresses and Indian mobile numbers;
+each submission creates a separate application. The per-form duplicate
+validation remains enabled for callback and demo-class requests, with unique
+registry indexes preserving those protections. The migration does not alter
+application records, ID-generation rules, RLS, or authorization.
 
-The migration locks the three submission tables and stops without changing
-source records if existing duplicate contacts are found. Review the migration
-and resolve any reported pre-existing duplicates through the academy's approved
-data-maintenance process before applying it. Do not remove student records to
-make the migration succeed. No new environment variables are required; the
-existing server-side Supabase service-role key is used for validation.
+No existing student records need to be removed or changed. Application
+references continue to be generated on submission, and Student IDs continue to
+be generated when an application is accepted. No new environment variables are
+required; the existing server-side Supabase service-role key is used for
+callback and demo duplicate validation.
 
 ## 2.3. Official Admission PDF and Payment Versions
 

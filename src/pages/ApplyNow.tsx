@@ -501,10 +501,10 @@ export const ApplyNow: React.FC<ApplyNowProps> = ({
                         value={mobile}
                         onChange={(e) => setMobile(e.target.value)}
                         onBlur={() => void contactValidation.validateMobile(mobile)}
-                        aria-invalid={contactValidation.mobileCheck.duplicate || Boolean(contactValidation.mobileCheck.error)}
+                        aria-invalid={Boolean(contactValidation.mobileCheck.error)}
                         aria-describedby="application-mobile-validation"
                         placeholder="+91 98765 43210"
-                        className={`w-full px-4 py-2.5 rounded-xl border text-sm focus:outline-hidden focus:ring-2 focus:ring-orange-500 ${contactValidation.mobileCheck.duplicate || contactValidation.mobileCheck.error ? 'border-rose-600' : 'border-slate-300'}`}
+                        className={`w-full px-4 py-2.5 rounded-xl border text-sm focus:outline-hidden focus:ring-2 focus:ring-orange-500 ${contactValidation.mobileCheck.error ? 'border-rose-600' : 'border-slate-300'}`}
                       />
                       <ContactValidationMessage id="application-mobile-validation" state={contactValidation.mobileCheck} />
                     </div>
@@ -521,10 +521,10 @@ export const ApplyNow: React.FC<ApplyNowProps> = ({
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
                         onBlur={() => void contactValidation.validateEmail(email)}
-                        aria-invalid={contactValidation.emailCheck.duplicate || Boolean(contactValidation.emailCheck.error)}
+                        aria-invalid={Boolean(contactValidation.emailCheck.error)}
                         aria-describedby="application-email-validation"
                         placeholder="student@example.com"
-                        className={`w-full px-4 py-2.5 rounded-xl border text-sm focus:outline-hidden focus:ring-2 focus:ring-orange-500 ${contactValidation.emailCheck.duplicate || contactValidation.emailCheck.error ? 'border-rose-600' : 'border-slate-300'}`}
+                        className={`w-full px-4 py-2.5 rounded-xl border text-sm focus:outline-hidden focus:ring-2 focus:ring-orange-500 ${contactValidation.emailCheck.error ? 'border-rose-600' : 'border-slate-300'}`}
                       />
                       <ContactValidationMessage id="application-email-validation" state={contactValidation.emailCheck} />
                       <p className="text-[11px] text-slate-400 mt-1">Confirmation and application updates will be delivered to this address.</p>

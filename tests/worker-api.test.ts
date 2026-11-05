@@ -62,6 +62,8 @@ const contactAcknowledgement = {
   message: 'We received your request. If it can be processed, the academy will contact you.',
 };
 
+let nextTestApplicationReference = 1;
+
 const jpegDataUrlOfSize = (sizeBytes: number): string => {
   const bytes = new Uint8Array(sizeBytes);
   bytes[0] = 0xff;
@@ -140,6 +142,7 @@ async function submitPublicContact(
   const applicationMedia = mockR2Bucket({ deleteError: options.cleanupFailure });
   const duplicateCheckPayloads: Array<Record<string, unknown>> = [];
   const insertedRecords: Array<{ path: string; body: Record<string, unknown> }> = [];
+  const applicationReferences: string[] = [];
   const applicationNotifications: Array<Record<string, unknown>> = [];
   const sentEmails: string[] = [];
 
@@ -182,7 +185,9 @@ async function submitPublicContact(
       const record = { path: url.pathname, body: await request.json() as Record<string, unknown> };
       insertedRecords.push(record);
       if (url.pathname === '/rest/v1/applications') {
-        return Response.json({ application_reference: 'UEA-APP-2026-0001' }, { status: 201 });
+        const applicationReference = `UEA-APP-2026-${String(nextTestApplicationReference++).padStart(4, '0')}`;
+        applicationReferences.push(applicationReference);
+        return Response.json({ application_reference: applicationReference }, { status: 201 });
       }
       if (url.pathname === '/rest/v1/callback_requests') {
         return Response.json({ id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc' }, { status: 201 });
@@ -209,7 +214,7 @@ async function submitPublicContact(
         APPLICATION_MEDIA: applicationMedia.binding,
       },
     );
-    return { response, duplicateCheckPayloads, insertedRecords, applicationMedia, applicationNotifications, sentEmails };
+    return { response, duplicateCheckPayloads, insertedRecords, applicationReferences, applicationMedia, applicationNotifications, sentEmails };
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -1728,7 +1733,7 @@ test('agreed-fee administration API is unavailable', async () => {
   assert.deepEqual(await response.json(), { error: 'API route not found.' });
 });
 
-test('all public contact submissions normalize contacts and check duplicates within their own form type', async () => {
+test('public contact submissions normalize contacts and retain callback/demo duplicate checks', async () => {
   const sourceTables = {
     '/api/apply': 'applications',
     '/api/demo-class-requests': 'demo_class_requests',
@@ -1738,12 +1743,16 @@ test('all public contact submissions normalize contacts and check duplicates wit
     const result = await submitPublicContact(submission.path, submission.body);
     assert.equal(result.response.status, 202, submission.path);
     assert.deepEqual(await result.response.json(), contactAcknowledgement, submission.path);
-    assert.equal(result.duplicateCheckPayloads.length, 1, submission.path);
-    assert.deepEqual(result.duplicateCheckPayloads[0], {
-      p_source_table: sourceTables[submission.path as keyof typeof sourceTables],
-      p_email: 'student@example.com',
-      p_mobile: '9876543210',
-    }, submission.path);
+    if (submission.path === '/api/apply') {
+      assert.equal(result.duplicateCheckPayloads.length, 0, submission.path);
+    } else {
+      assert.equal(result.duplicateCheckPayloads.length, 1, submission.path);
+      assert.deepEqual(result.duplicateCheckPayloads[0], {
+        p_source_table: sourceTables[submission.path as keyof typeof sourceTables],
+        p_email: 'student@example.com',
+        p_mobile: '9876543210',
+      }, submission.path);
+    }
     assert.equal(result.insertedRecords.length, 1, submission.path);
     assert.equal(result.insertedRecords[0].path, `/rest/v1/${submission.table}`, submission.path);
     assert.equal(result.insertedRecords[0].body.email, 'student@example.com', submission.path);
@@ -1819,11 +1828,7 @@ test('application Worker stores category-specific fields and removes hidden cate
       assert.equal(saved.school_name, 'Example School');
       assert.equal(saved.college_name, null);
       assert.equal(saved.occupation, null);
-      assert.deepEqual(result.duplicateCheckPayloads[0], {
-        p_source_table: 'applications',
-        p_email: 'parent@example.com',
-        p_mobile: '9876543210',
-      });
+      assert.equal(result.duplicateCheckPayloads.length, 0);
       assert.equal(result.applicationNotifications.find(({ notification_type }) =>
         notification_type === 'student_confirmation')?.recipient_email, 'parent@example.com');
       assert.ok(result.sentEmails.includes('parent@example.com'));
@@ -1965,8 +1970,8 @@ test('callback submission returns an error and does not acknowledge success when
   assert.equal(result.insertedRecords.length, 0);
 });
 
-test('same-form duplicates return an error and are not reported as saved', async () => {
-  for (const submission of publicContactSubmissions) {
+test('callback and demo duplicates return an error and are not reported as saved', async () => {
+  for (const submission of publicContactSubmissions.filter(({ path }) => path !== '/api/apply')) {
     const result = await submitPublicContact(
       submission.path,
       submission.body,
@@ -2008,29 +2013,38 @@ test('identical contact details are accepted independently by each request form'
   }
 });
 
-test('application duplicate race returns a conflict and attempts photo cleanup', async () => {
+test('three applications can reuse the same email and mobile with distinct generated IDs', async () => {
   const submission = publicContactSubmissions.find(({ path }) => path === '/api/apply');
   assert.ok(submission);
-  const result = await submitPublicContact(
-    submission.path,
-    submission.body,
-    () => Response.json(false),
-    { insertDuplicate: true, cleanupFailure: true },
-  );
-  assert.equal(result.response.status, 409);
-  assert.match((await result.response.json() as { error: string }).error, /already exists for this form/i);
-  assert.equal(result.insertedRecords.length, 0);
-  assert.equal(result.applicationMedia.deletes.length, 1);
+  const results = [];
+  for (let index = 0; index < 3; index += 1) {
+    results.push(await submitPublicContact(submission.path, submission.body));
+  }
+  const inserted = results.map((result) => result.insertedRecords.find(({ path }) => path === '/rest/v1/applications')?.body);
+  const applicationIds = inserted.map((application) => application?.id);
+  const applicationReferences = results.flatMap((result) => result.applicationReferences);
+  assert.ok(results.every((result) => result.response.status === 202));
+  assert.ok(inserted.every((application) =>
+    application?.email === 'student@example.com'
+    && application.mobile === '9876543210'
+    && application.status === 'Pending'
+    && !('student_id' in application),
+  ));
+  assert.equal(new Set(applicationIds).size, 3);
+  assert.ok(applicationIds.every((id) => typeof id === 'string' && /^[0-9a-f-]{36}$/i.test(id)));
+  assert.equal(new Set(applicationReferences).size, 3);
+  assert.equal(applicationReferences.length, 3);
+  assert.ok(results.every((result) => result.duplicateCheckPayloads.length === 0));
 });
 
-test('all public contact submissions fail closed when duplicate verification errors or is unavailable', async () => {
+test('callback and demo submissions fail closed when duplicate verification errors or is unavailable', async () => {
   const rpcFailures = [
     () => Response.json({ code: 'P0001', message: 'validation unavailable' }, { status: 503 }),
     () => Response.json(null),
     () => { throw new Error('mock network failure'); },
   ];
 
-  for (const submission of publicContactSubmissions) {
+  for (const submission of publicContactSubmissions.filter(({ path }) => path !== '/api/apply')) {
     for (const rpcFailure of rpcFailures) {
       const result = await submitPublicContact(submission.path, submission.body, rpcFailure);
       assert.equal(result.response.status, 503, `${submission.path} RPC failure`);

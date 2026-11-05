@@ -2321,10 +2321,6 @@ const submitApplication = async (request: Request, env: Env): Promise<Response> 
   if (!normalizedMobile || applicationMobile.length > 30) return errorResponse('Please provide a valid Indian mobile number.', 400);
   fields.mobile = normalizedMobile;
 
-  const duplicate = await checkContactDuplicates(supabase, 'applications', fields.email, fields.mobile);
-  if (isResponse(duplicate)) return duplicate;
-  if (duplicate) return duplicateContactResponse();
-
   const programId = body.program_id === undefined || body.program_id === null || body.program_id === '' ? null : body.program_id;
   if (programId !== null && (typeof programId !== 'string' || !validId(programId))) {
     return errorResponse('program_id must be a valid program ID.', 400);
@@ -2374,17 +2370,6 @@ const submitApplication = async (request: Request, env: Env): Promise<Response> 
     .select('application_reference')
     .single();
   if (insertError || !insertedApplication) {
-    if (isDuplicateContactError(insertError)) {
-      try {
-        await deleteFromR2(env, upload.key, 'applications');
-      } catch (cleanupError) {
-        console.error('Unable to clean up application photo after duplicate submission.', {
-          operation: 'applications.submit.photo_cleanup',
-          error: messageOf(cleanupError),
-        });
-      }
-      return duplicateContactResponse();
-    }
     try {
       await deleteFromR2(env, upload.key, 'applications');
     } catch (cleanupError) {
