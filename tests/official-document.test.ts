@@ -333,6 +333,28 @@ test('admission document preview uses the selected approved application data', a
   assert.deepEqual(photoReads, [photoKey]);
 });
 
+test('official document setting-key migration allows only the intended existing keys', async () => {
+  const originalMigration = await readFile(
+    new URL('../supabase/migrations/20261027000000_official_document_settings.sql', import.meta.url),
+    'utf8',
+  );
+  const keyMigration = await readFile(
+    new URL('../supabase/migrations/20261106000002_official_document_setting_key_check.sql', import.meta.url),
+    'utf8',
+  );
+  assert.match(originalMigration, /CHECK\s*\(setting_key\s*=\s*'official_fee_structure'\)/i);
+  assert.match(keyMigration, /DROP CONSTRAINT IF EXISTS official_document_settings_setting_key_check/i);
+  const updatedConstraint = keyMigration.match(
+    /ADD CONSTRAINT official_document_settings_setting_key_check\s+CHECK \(setting_key IN \(([^)]+)\)\)/i,
+  );
+  assert.ok(updatedConstraint);
+  assert.deepEqual(
+    [...updatedConstraint[1].matchAll(/'([^']+)'/g)].map((match) => match[1]),
+    ['admission_approval', 'official_fee_structure'],
+  );
+  assert.doesNotMatch(keyMigration, /DELETE\s+FROM|TRUNCATE|DROP TABLE/i);
+});
+
 test('approval attaches and stores the PDF generated from the immutable issuance snapshot', async () => {
   const uploaded: Array<{ key: string; bytes: Uint8Array; contentType?: string }> = [];
   const emailPayloads: Record<string, unknown>[] = [];
