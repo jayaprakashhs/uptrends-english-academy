@@ -3964,9 +3964,9 @@ const res = await fetchAdmin(url, {
           {/* TAB 8: SETTINGS & OFFICIAL PDF */}
           {activeTab === 'settings' && (
             <div className="mx-auto max-w-6xl space-y-5">
-              <header className="rounded-2xl border border-orange-100 bg-gradient-to-r from-[#fff8ef] via-white to-emerald-50 p-5 shadow-sm">
+              <header className="rounded-2xl border border-orange-100 bg-gradient-to-r from-[#fff8ef] via-white to-[#EAF3FF] p-5 shadow-sm">
                 <p className="text-[10px] font-bold uppercase tracking-[.16em] text-orange-700">Official documents</p>
-                <h1 className="mt-1 text-xl font-extrabold text-[#0B1F4D] sm:text-2xl">Settings & Official PDF Configuration</h1>
+                <h1 className="mt-1 text-xl font-extrabold text-[#123B78] sm:text-2xl">Settings & Official PDF Configuration</h1>
                 <p className="mt-2 text-xs leading-relaxed text-slate-600">Configure the branded PDF template. Student-specific information is read directly from an approved application and cannot be edited here.</p>
               </header>
 
@@ -4070,18 +4070,24 @@ const res = await fetchAdmin(url, {
                       <button type="button" onClick={() => { setPendingOfficialGraphic(null); setOfficialDocumentSettings((current) => ({ ...current, graphicObjectKey: null })); setOfficialGraphicPreviewUrl(null); }} className="text-xs font-semibold text-rose-700 underline">Remove graphic</button>
                     </div>
                   </div>
-                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                    {([
-                      ['orange', 'Academy orange'],
-                      ['green', 'Academy green'],
-                      ['navy', 'Navy typography'],
-                      ['background', 'PDF background'],
-                    ] as const).map(([key, label]) => (
-                      <label key={key} className="flex min-h-11 items-center gap-3 rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700">
-                        <input type="color" value={officialDocumentSettings.colors[key]} onChange={(event) => setOfficialDocumentSettings((current) => ({ ...current, colors: { ...current.colors, [key]: event.target.value } }))} className="h-8 w-10 cursor-pointer rounded border-0 bg-transparent p-0" />
-                        {label}
-                      </label>
-                    ))}
+                  <div className="rounded-xl border border-slate-200 bg-[#F4F7FC] p-3">
+                    <p className="text-xs font-bold text-[#123B78]">Fixed official document palette</p>
+                    <p className="mt-1 text-[11px] text-slate-500">The PDF preview and newly issued documents use this academy palette.</p>
+                    <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                      {([
+                        ['Navy', '#123B78'],
+                        ['Orange', '#FF6B00'],
+                        ['White', '#FFFFFF'],
+                        ['Light blue', '#EAF3FF'],
+                        ['Light blue-grey', '#F4F7FC'],
+                        ['Dark text', '#142B50'],
+                      ] as const).map(([label, color]) => (
+                        <div key={label} className="flex items-center gap-2 rounded-lg bg-white px-2 py-1.5 text-[11px] font-semibold text-slate-700">
+                          <span aria-hidden="true" className="h-5 w-5 shrink-0 rounded border border-slate-200" style={{ backgroundColor: color }} />
+                          <span>{label} <span className="font-mono font-normal text-slate-500">{color}</span></span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                   <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                     <label className="text-xs font-semibold text-slate-700">Font family
@@ -4145,17 +4151,18 @@ const res = await fetchAdmin(url, {
                       />
                     </label>
                     <label className="text-xs font-semibold text-slate-700">Spacing
-                      <input type="number" min="0.75" max="1.75" step="0.05" value={officialDocumentSettings.layout.spacing} onChange={(event) => setOfficialDocumentSettings((current) => ({ ...current, layout: { ...current.layout, spacing: Number(event.target.value) } }))} className="mt-1 min-h-10 w-full rounded-lg border border-slate-200 px-3" />
+                      <input type="number" min="0.85" max="1.25" step="0.05" value={officialDocumentSettings.layout.spacing} onChange={(event) => setOfficialDocumentSettings((current) => ({ ...current, layout: { ...current.layout, spacing: Number(event.target.value) } }))} className="mt-1 min-h-10 w-full rounded-lg border border-slate-200 px-3" />
                     </label>
                   </div>
                   <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
                     {([
-                      ['showLogo', 'Show academy logo'], ['showStudentPhoto', 'Show student photo'],
+                      ['showStudentPhoto', 'Show student photo'],
                       ['showDecorations', 'Show decorations'], ['showFooter', 'Show branded footer'],
                     ] as const).map(([key, label]) => (
                       <label key={key} className="flex min-h-10 items-center gap-2 rounded-lg border border-slate-100 px-3 text-xs font-semibold text-slate-700"><input type="checkbox" checked={officialDocumentSettings.layout[key]} onChange={(event) => setOfficialDocumentSettings((current) => ({ ...current, layout: { ...current.layout, [key]: event.target.checked } }))} />{label}</label>
                     ))}
                   </div>
+                  <p className="text-[11px] text-slate-500">The currently saved academy logo is always included when one is configured.</p>
                 </section>
 
                 <div className="sticky bottom-2 flex flex-wrap justify-end gap-2 rounded-2xl border border-slate-200 bg-white/95 p-3 shadow-lg backdrop-blur">

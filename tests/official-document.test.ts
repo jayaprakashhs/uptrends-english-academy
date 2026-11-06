@@ -38,21 +38,23 @@ const selectedCourse: OfficialCourse = {
   level: 'Intermediate',
 };
 
-const decodePdfText = (bytes: Uint8Array): string => {
+const decodePdfStreams = (bytes: Uint8Array): string => {
   const source = Buffer.from(bytes).toString('latin1');
   const decodedStreams: string[] = [];
   for (const match of source.matchAll(/stream\r?\n([\s\S]*?)\r?\nendstream/g)) {
     try {
-      const stream = inflateSync(Buffer.from(match[1], 'latin1')).toString('latin1');
-      for (const text of stream.matchAll(/<([0-9a-f]+)> Tj/gi)) {
-        decodedStreams.push(Buffer.from(text[1], 'hex').toString('latin1'));
-      }
+      decodedStreams.push(inflateSync(Buffer.from(match[1], 'latin1')).toString('latin1'));
     } catch {
-      // Non-Flate streams do not contain the generated page text.
+      // Non-Flate streams do not contain the generated page commands.
     }
   }
   return decodedStreams.join('\n');
 };
+
+const decodePdfText = (bytes: Uint8Array): string =>
+  [...decodePdfStreams(bytes).matchAll(/<([0-9a-f]+)> Tj/gi)]
+    .map((text) => Buffer.from(text[1], 'hex').toString('latin1'))
+    .join('\n');
 
 const makeWorkerEnv = (overrides: Record<string, unknown> = {}) => ({
   SUPABASE_URL: 'https://project.example',
@@ -146,6 +148,43 @@ test('admission approval PDF contains real student details without fee or paymen
   assert.doesNotMatch(text, /payment|paid|balance|transaction|INR|PRIVATE-REFERENCE|private-payment-id|upi/i);
   assert.doesNotMatch(text, /Spoken English|Business English|Other Course/);
   assert.doesNotMatch(text, /\b(?:document\s*)?version\s*[:#-]?\s*\d+\b/i);
+});
+
+test('official PDF uses branded header and footer and omits a missing-photo placeholder', async () => {
+  const bytes = await generateOfficialPdf({
+    settings: {
+      ...DEFAULT_OFFICIAL_DOCUMENT_SETTINGS,
+      colors: {
+        orange: '#00AA00',
+        green: '#00AA00',
+        navy: '#00AA00',
+        background: '#00AA00',
+      },
+      layout: {
+        ...DEFAULT_OFFICIAL_DOCUMENT_SETTINGS.layout,
+        showLogo: false,
+      },
+    },
+    student,
+    course: selectedCourse,
+    assets: { logo: { bytes: pngBytes, mime: 'image/png' } },
+  });
+  const pdf = await PDFDocument.load(bytes);
+  const text = decodePdfText(bytes);
+  const source = Buffer.from(bytes).toString('latin1');
+  const commands = decodePdfStreams(bytes);
+
+  assert.equal(pdf.getPageCount(), 1);
+  assert.match(text, /Uptrend's English Academy/);
+  assert.match(text, /DAVANGERE - KARNATAKA/);
+  assert.match(text, /https:\/\/uptrendsenglishacademy\.in/);
+  assert.match(text, /Page 1 of 1/);
+  assert.match(text, /UEA-APP-2026-0001/);
+  assert.doesNotMatch(text, /\bPHOTO\b|Best Wishes!|document\s*version/i);
+  assert.match(source, /\/Subtype\s*\/Image/);
+  assert.match(commands, /0\.07058823529411765 0\.23137254901960785 0\.47058823529411764 rg/);
+  assert.match(commands, /1 0\.4196078431372549 0 rg/);
+  assert.doesNotMatch(commands, /0 0\.6666666666666666 0 rg/);
 });
 
 test('graduate and working PDFs use applicant contacts and never parent contacts', async () => {
