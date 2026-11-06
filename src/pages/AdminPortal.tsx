@@ -61,6 +61,7 @@ import { getWhatsAppUrl } from '../lib/whatsapp';
 import { fetchSystemStatus, type IntegrationHealth, type SystemStatus } from '../lib/systemStatus';
 import { AdminDemoClassRequests } from '../components/AdminDemoClassRequests';
 import { AboutUsManagement } from '../components/AboutUsManagement';
+import { EmailSettingsTemplates } from '../components/EmailSettingsTemplates';
 import {
   DEFAULT_JOINING_INFORMATION,
   JOINING_CLASS_SCHEDULES,
@@ -1667,6 +1668,7 @@ const res = await fetchAdmin(url, {
     { id: 'faqs', label: 'FAQs Management', icon: HelpCircle, minRole: 'super_admin' },
     { id: 'about-us', label: 'About Us Management', icon: UserCog, minRole: 'super_admin' },
     { id: 'notifications', label: 'Email History', icon: Send, minRole: 'super_admin' },
+    { id: 'email-settings', label: 'Email Settings & Templates', icon: Send, minRole: 'staff' },
     { id: 'roles', label: 'Admin Roles & Access', icon: ShieldCheck, minRole: 'super_admin' },
     { id: 'settings', label: 'Settings & PDF Config', icon: Settings, minRole: 'super_admin' },
   ];
@@ -3959,6 +3961,13 @@ const res = await fetchAdmin(url, {
                 </div>
               </div>
             </div>
+          )}
+
+          {activeTab === 'email-settings' && (
+            <EmailSettingsTemplates
+              currentAdmin={currentAdmin}
+              onSessionExpired={onSessionExpired}
+            />
           )}
 
           {/* TAB 8: SETTINGS & OFFICIAL PDF */}

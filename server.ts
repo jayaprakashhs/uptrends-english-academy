@@ -16,6 +16,11 @@ import {
   normalizeIndianMobileNumber,
 } from './contact-validation';
 import { renderBrandedEmail, type EmailBranding } from './email-template';
+import {
+  applyEmailTemplate,
+  DEFAULT_EMAIL_SETTINGS,
+  normalizeEmailSettings,
+} from './email-settings';
 import { isAudienceTag } from './audience-tags';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -1527,6 +1532,9 @@ app.post('/api/callback-request', async (req, res) => {
     }
 
     let emailBranding: EmailBranding = { publicAssetBaseUrl: R2_PUBLIC_URL };
+    let emailSettings = DEFAULT_EMAIL_SETTINGS;
+    let emailSettingsPersisted = false;
+    let siteBranding: Record<string, unknown> | null = null;
     if (supabase) {
       try {
         const { data, error } = await supabase
@@ -1537,22 +1545,66 @@ app.post('/api/callback-request', async (req, res) => {
         if (error) {
           console.error('[Email Branding Error]', { code: error.code || 'database_query_failed' });
         } else if (data) {
-          emailBranding = {
-            academyName: data.academy_name,
-            logoUrl: data.logo_url,
-            primaryGreen: data.primary_green,
-            primaryOrange: data.primary_orange,
-            publicAssetBaseUrl: R2_PUBLIC_URL,
-          };
+          siteBranding = data;
         }
       } catch (brandingError) {
         console.error('[Email Branding Error]', brandingError);
       }
+      try {
+        const { data, error } = await supabase
+          .from('email_template_settings')
+          .select('settings')
+          .eq('setting_key', 'default')
+          .maybeSingle();
+        if (error) {
+          console.error('[Email Settings Error]', { code: error.code || 'database_query_failed' });
+        } else if (data) {
+          const normalized = normalizeEmailSettings(data.settings);
+          if (normalized) {
+            emailSettings = normalized;
+            emailSettingsPersisted = true;
+          } else {
+            console.error('[Email Settings Error]', { code: 'invalid_saved_settings' });
+          }
+        }
+        if (!emailSettingsPersisted && typeof siteBranding?.academy_name === 'string') {
+          emailSettings = {
+            ...emailSettings,
+            branding: { ...emailSettings.branding, academyName: siteBranding.academy_name },
+          };
+        }
+      } catch {
+        console.error('[Email Settings Error]', { code: 'settings_read_failed' });
+      }
     }
-    const renderedEmail = renderBrandedEmail({
+    const configuredBranding = emailSettings.branding;
+    emailBranding = {
+      academyName: configuredBranding.academyName || siteBranding?.academy_name,
+      logoUrl: configuredBranding.logoUrl || siteBranding?.logo_url,
+      primaryGreen: siteBranding?.primary_green,
+      primaryOrange: configuredBranding.accentColor,
+      headerText: configuredBranding.headerText,
+      academyTagline: configuredBranding.academyTagline,
+      headerBackgroundColor: configuredBranding.headerBackgroundColor,
+      headerTextColor: configuredBranding.headerTextColor,
+      footerBackgroundColor: configuredBranding.footerBackgroundColor,
+      footerTextColor: configuredBranding.footerTextColor,
+      accentColor: configuredBranding.accentColor,
+      footerTagline: configuredBranding.footerTagline,
+      address: configuredBranding.address,
+      phone: configuredBranding.phone,
+      email: configuredBranding.email,
+      website: configuredBranding.website,
+      copyright: configuredBranding.copyright,
+      disclaimer: configuredBranding.disclaimer,
+      headerPhotoUrl: configuredBranding.headerPhotoKey,
+      publicAssetBaseUrl: R2_PUBLIC_URL,
+    };
+    const callbackContent = applyEmailTemplate(emailSettings, 'callback_staff', {
       title: 'New Callback Request',
       paragraphs: ['A new callback request has been received.'],
       status: 'Pending',
+      actionMessage: `Please contact the applicant during their preferred ${String(preferred_contact_time).toLowerCase()} time window.`,
       details: [
         { label: 'Applicant', value: String(full_name) },
         { label: 'Mobile', value: String(normalizedMobile) },
@@ -1561,7 +1613,8 @@ app.post('/api/callback-request', async (req, res) => {
         { label: 'Preferred Time', value: String(preferred_contact_time) },
         { label: 'Message', value: String(message || 'None') },
       ],
-    }, emailBranding);
+    });
+    const renderedEmail = renderBrandedEmail(callbackContent, emailBranding);
     await sendEmailViaResend({
       to: APPLICATION_NOTIFICATION_EMAIL,
       subject: `New Callback Request — ${full_name} (${preferred_contact_time})`,
@@ -1592,6 +1645,9 @@ app.all(
     '/api/admin/official-document/preview',
     '/api/admin/official-document/issued',
     '/api/admin/official-document/assets',
+    '/api/admin/email-settings',
+    '/api/admin/email-settings/reset',
+    '/api/admin/email-settings/header-photo',
     '/api/admin/about-us/assets',
     '/api/about-us/assets',
   ],

@@ -20,7 +20,19 @@ import {
   normalizeContactEmail,
   normalizeIndianMobileNumber,
 } from './contact-validation';
-import { renderBrandedEmail, type EmailBranding, type EmailContent } from './email-template';
+import {
+  renderBrandedEmail,
+  resolvePublicEmailImageUrl,
+  type EmailBranding,
+  type EmailContent,
+} from './email-template';
+import {
+  applyEmailTemplate,
+  DEFAULT_EMAIL_SETTINGS,
+  normalizeEmailSettings,
+  type EmailSettings,
+  type EmailTemplateKey,
+} from './email-settings';
 import { isAudienceTag } from './audience-tags';
 import {
   getJoiningInformationErrors,
@@ -625,7 +637,7 @@ const decodeImage = (
 
 const bucketForPrefix = (
   env: Env,
-  prefix: 'applications' | 'branding' | 'demo-class-requests' | 'media' | 'programs' | 'official-document-assets' | 'official-documents',
+  prefix: 'applications' | 'branding' | 'demo-class-requests' | 'email-assets' | 'media' | 'programs' | 'official-document-assets' | 'official-documents',
 ): R2BucketBinding | undefined =>
   prefix === 'applications' ||
   prefix === 'demo-class-requests' ||
@@ -637,11 +649,11 @@ const bucketForPrefix = (
 function uploadToR2(env: Env, image: ImagePayload, prefix: 'applications'): Promise<{ key: string } | Response>;
 function uploadToR2(env: Env, image: ImagePayload, prefix: 'demo-class-requests'): Promise<{ key: string } | Response>;
 function uploadToR2(env: Env, image: ImagePayload, prefix: 'official-document-assets'): Promise<{ key: string } | Response>;
-function uploadToR2(env: Env, image: ImagePayload, prefix: 'branding' | 'media' | 'programs'): Promise<{ key: string; url: string } | Response>;
+function uploadToR2(env: Env, image: ImagePayload, prefix: 'branding' | 'email-assets' | 'media' | 'programs'): Promise<{ key: string; url: string } | Response>;
 async function uploadToR2(
   env: Env,
   image: ImagePayload,
-  prefix: 'applications' | 'branding' | 'demo-class-requests' | 'media' | 'programs' | 'official-document-assets',
+  prefix: 'applications' | 'branding' | 'demo-class-requests' | 'email-assets' | 'media' | 'programs' | 'official-document-assets',
 ): Promise<{ key: string; url?: string } | Response> {
   const bucket = bucketForPrefix(env, prefix);
   const publicUrl = env.CLOUDFLARE_R2_PUBLIC_URL?.replace(/\/+$/, '');
@@ -684,7 +696,7 @@ async function uploadToR2(
 const deleteFromR2 = async (
   env: Env,
   key: string,
-  prefix: 'applications' | 'branding' | 'media' | 'programs' | 'official-document-assets' | 'official-documents',
+  prefix: 'applications' | 'branding' | 'email-assets' | 'media' | 'programs' | 'official-document-assets' | 'official-documents',
 ): Promise<void> => {
   const validPrivateKey = prefix === 'official-document-assets'
     ? /^official-document-assets\/[0-9a-f-]+\.(?:jpg|png|webp)$/i.test(key)
@@ -782,8 +794,9 @@ const buildApprovalEmail = (
         'Please find your official admission approval document attached.',
       ],
       status: 'Approved',
+      actionMessage: 'Please keep the attached admission document for your records and follow the joining instructions.',
+      referenceNumber: student.application_reference,
       details: [
-        { label: 'Application Number', value: student.application_reference },
         { label: 'Student ID', value: student.student_id },
         { label: 'Program', value: student.program_name },
       ],
@@ -804,12 +817,67 @@ const toBase64 = (bytes: Uint8Array): string => {
   return btoa(binary);
 };
 
+interface EmailSettingsRead {
+  settings: EmailSettings;
+  updated_at: string | null;
+  updated_by: string | null;
+  persisted: boolean;
+  issue?: string;
+}
+
+const readEmailSettings = async (supabase: SupabaseClient): Promise<EmailSettingsRead> => {
+  try {
+    const { data, error } = await supabase
+      .from('email_template_settings')
+      .select('settings,updated_at,updated_by')
+      .eq('setting_key', 'default')
+      .maybeSingle();
+    if (error) {
+      return {
+        settings: DEFAULT_EMAIL_SETTINGS,
+        updated_at: null,
+        updated_by: null,
+        persisted: false,
+        issue: error.code || 'database_query_failed',
+      };
+    }
+    if (!data) {
+      return { settings: DEFAULT_EMAIL_SETTINGS, updated_at: null, updated_by: null, persisted: false };
+    }
+    const settings = normalizeEmailSettings(data.settings);
+    if (!settings) {
+      return {
+        settings: DEFAULT_EMAIL_SETTINGS,
+        updated_at: data.updated_at || null,
+        updated_by: data.updated_by || null,
+        persisted: false,
+        issue: 'invalid_saved_settings',
+      };
+    }
+    return {
+      settings,
+      updated_at: data.updated_at || null,
+      updated_by: data.updated_by || null,
+      persisted: true,
+    };
+  } catch {
+    return {
+      settings: DEFAULT_EMAIL_SETTINGS,
+      updated_at: null,
+      updated_by: null,
+      persisted: false,
+      issue: 'settings_read_failed',
+    };
+  }
+};
+
 const sendEmail = async (
   env: Env,
   message: {
     to: string;
     subject: string;
     content: EmailContent;
+    templateKey?: EmailTemplateKey;
     attachments?: EmailAttachment[];
     idempotencyKey?: string;
   },
@@ -819,6 +887,9 @@ const sendEmail = async (
   try {
     const brandingClient = getSupabaseClient(env, true, 'email.branding.read');
     let branding: EmailBranding = { publicAssetBaseUrl: env.CLOUDFLARE_R2_PUBLIC_URL };
+    let emailSettings = DEFAULT_EMAIL_SETTINGS;
+    let emailSettingsPersisted = false;
+    let siteBranding: Record<string, unknown> | null = null;
     if (brandingClient) {
       try {
         const { data, error } = await brandingClient
@@ -832,13 +903,7 @@ const sendEmail = async (
             error_code: error.code || 'database_query_failed',
           });
         } else if (data) {
-          branding = {
-            academyName: data.academy_name,
-            logoUrl: data.logo_url,
-            primaryGreen: data.primary_green,
-            primaryOrange: data.primary_orange,
-            publicAssetBaseUrl: env.CLOUDFLARE_R2_PUBLIC_URL,
-          };
+          siteBranding = data;
         }
       } catch (error) {
         console.error('Email branding could not be loaded; using the academy name fallback.', {
@@ -846,7 +911,53 @@ const sendEmail = async (
           error: messageOf(error),
         });
       }
+      const emailSettingsResult = await readEmailSettings(brandingClient);
+      emailSettings = emailSettingsResult.settings;
+      emailSettingsPersisted = emailSettingsResult.persisted;
+      if (emailSettingsResult.issue) {
+        console.error('Email template settings could not be loaded; using the last-known default design.', {
+          operation: 'email.settings.read',
+          error_code: emailSettingsResult.issue,
+        });
+      }
     }
+    const effectiveEmailSettings = !emailSettingsPersisted && typeof siteBranding?.academy_name === 'string'
+      ? {
+          ...emailSettings,
+          branding: { ...emailSettings.branding, academyName: siteBranding.academy_name },
+        }
+      : emailSettings;
+    const configured = effectiveEmailSettings.branding;
+    branding = {
+      academyName: emailSettingsPersisted
+        ? configured.academyName
+        : siteBranding?.academy_name || configured.academyName,
+      logoUrl: configured.logoUrl || siteBranding?.logo_url,
+      primaryGreen: siteBranding?.primary_green,
+      primaryOrange: configured.accentColor,
+      headerText: configured.headerText,
+      academyTagline: configured.academyTagline,
+      headerBackgroundColor: configured.headerBackgroundColor,
+      headerTextColor: configured.headerTextColor,
+      footerBackgroundColor: configured.footerBackgroundColor,
+      footerTextColor: configured.footerTextColor,
+      accentColor: configured.accentColor,
+      footerTagline: configured.footerTagline,
+      address: configured.address,
+      phone: configured.phone,
+      email: configured.email,
+      website: configured.website,
+      copyright: configured.copyright,
+      disclaimer: configured.disclaimer,
+      headerPhotoUrl: configured.headerPhotoKey,
+      publicAssetBaseUrl: env.CLOUDFLARE_R2_PUBLIC_URL,
+    };
+    message = {
+      ...message,
+      content: message.templateKey
+        ? applyEmailTemplate(effectiveEmailSettings, message.templateKey, message.content)
+        : message.content,
+    };
     const rendered = renderBrandedEmail(message.content, branding);
     const response = await fetch('https://api.resend.com/emails', {
       method: 'POST',
@@ -879,6 +990,7 @@ interface RequestEmailMessage {
   recipient_email: string;
   subject: string;
   content: EmailContent;
+  templateKey: EmailTemplateKey;
 }
 
 const sendRequestEmails = async (
@@ -890,6 +1002,7 @@ const sendRequestEmails = async (
       to: message.recipient_email,
       subject: message.subject,
       content: message.content,
+      templateKey: message.templateKey,
     });
     if (!emailResult.success) {
       console.error('Request email delivery failed.', {
@@ -2090,6 +2203,7 @@ const submitApplication = async (request: Request, env: Env): Promise<Response> 
   const [studentEmail, academyEmail] = await Promise.all([sendEmail(env, {
     to: fields.email,
     subject: "Application Received — Uptrend's English Academy",
+    templateKey: 'application_applicant',
     content: {
       title: 'Application Received',
       greeting: fields.student_name,
@@ -2098,16 +2212,24 @@ const submitApplication = async (request: Request, env: Env): Promise<Response> 
         'Your application has been received and is awaiting review by our team.',
       ],
       status: 'Awaiting review',
-      details: [{ label: 'Application Reference', value: applicationReference }],
+      actionMessage: 'Our admissions team will review your application and contact you with the next steps.',
+      referenceNumber: applicationReference,
+      details: [
+        { label: 'Program', value: fields.program_name },
+        { label: 'Application Reference', value: applicationReference },
+      ],
     },
     idempotencyKey: `application-student-confirmation-${applicationId}`,
   }), sendEmail(env, {
     to: env.APPLICATION_NOTIFICATION_EMAIL || 'uptrendsinstitute@gmail.com',
     subject: `New Student Application — ${fields.student_name}`,
+    templateKey: 'application_staff',
     content: {
       title: 'New Student Application Received',
       paragraphs: ['A new student application has been submitted for review.'],
       status: 'Pending',
+      actionMessage: 'Please review this submission in the Admin Portal.',
+      referenceNumber: applicationReference,
       details: [
         { label: 'Student', value: fields.student_name },
         { label: 'Program', value: fields.program_name },
@@ -2193,27 +2315,40 @@ const submitDemoClassRequest = async (request: Request, env: Env): Promise<Respo
   }
 
   const { full_name, email, mobile, qualification_category, educational_qualification, city } = requestRecord;
+  const requestDate = new Intl.DateTimeFormat('en-IN', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+    timeZone: 'Asia/Kolkata',
+  }).format(new Date());
   const internalEmail = env.APPLICATION_NOTIFICATION_EMAIL || 'uptrendsinstitute@gmail.com';
   await sendRequestEmails(env, [
     {
       notification_type: 'applicant_confirmation',
       recipient_email: email,
       subject: "Demo Class Request Received — Uptrend's English Academy",
+      templateKey: 'demo_applicant',
       content: {
         title: 'Free Demo Class Request Received',
         greeting: full_name,
-        paragraphs: ['Thank you for requesting a free demo class at Uptrend\'s English Academy. Our team will contact you soon to discuss arrangements.'],
+        paragraphs: ['Thank you for requesting a free demo class at Uptrend\'s English Academy.'],
         status: 'Pending',
+        actionMessage: 'Our team will contact you soon to discuss the demo class schedule and next steps.',
+        details: [
+          { label: 'Program', value: educational_qualification },
+          { label: 'Request Date', value: requestDate },
+        ],
       },
     },
     {
       notification_type: 'academy_notification',
       recipient_email: internalEmail,
       subject: `New Demo Class Request — ${full_name}`,
+      templateKey: 'demo_staff',
       content: {
         title: 'New Free Demo Class Request',
         paragraphs: ['A new free demo class request has been received.'],
         status: 'Pending',
+        actionMessage: 'Please follow up with the applicant to arrange the free demo class.',
         details: [
           { label: 'Student', value: full_name },
           { label: 'Mobile', value: mobile },
@@ -2221,6 +2356,7 @@ const submitDemoClassRequest = async (request: Request, env: Env): Promise<Respo
           { label: 'Category', value: qualification_category },
           { label: 'Qualification / Course', value: educational_qualification },
           { label: 'City', value: city },
+          { label: 'Request Date', value: requestDate },
         ],
       },
     },
@@ -2278,10 +2414,12 @@ const submitCallback = async (request: Request, env: Env): Promise<Response> => 
     notification_type: 'academy_notification',
     recipient_email: env.APPLICATION_NOTIFICATION_EMAIL || 'uptrendsinstitute@gmail.com',
     subject: `New Callback Request — ${fullName} (${preferredTime})`,
+    templateKey: 'callback_staff',
     content: {
       title: 'New Callback Request',
       paragraphs: ['A new callback request has been received.'],
       status: 'Pending',
+      actionMessage: `Please contact the applicant during their preferred ${preferredTime.toLowerCase()} time window.`,
       details: [
         { label: 'Applicant', value: fullName },
         { label: 'Mobile', value: normalizedMobile },
@@ -2403,6 +2541,7 @@ const approveApplication = async (request: Request, env: Env): Promise<Response>
   }
   const emailResult = await sendEmail(env, {
     ...approvalEmail,
+    templateKey: 'admission_approved',
     idempotencyKey: `student-approval-${applicationId}`,
   });
   const notificationUpdate = {
@@ -2936,6 +3075,224 @@ const validateOfficialDocumentSettings = (
     return errorResponse('Uploaded PDF asset references are invalid.', 400);
   }
   return settings;
+};
+
+const getEmailSettings = async (request: Request, env: Env): Promise<Response> => {
+  const auth = await requireAdmin(request, env, 'staff');
+  if (isResponse(auth)) return auth;
+  const result = await readEmailSettings(auth.supabase);
+  if (result.issue) {
+    console.error('Email settings could not be loaded from Supabase.', {
+      operation: 'admin.email_settings.read',
+      error_code: result.issue,
+    });
+    return errorResponse('Email settings could not be loaded. Verify that the email settings migration is installed.', 503);
+  }
+  const { data: brandingData, error: brandingError } = await auth.supabase
+    .from('site_branding')
+    .select('logo_url')
+    .limit(1)
+    .maybeSingle();
+  if (brandingError) {
+    console.error('Email preview could not load the current academy logo.', {
+      operation: 'admin.email_settings.logo_read',
+      error_code: brandingError.code || 'database_query_failed',
+    });
+    return errorResponse('Email preview could not load the current academy logo.', 503);
+  }
+  return json({
+    settings: result.settings,
+    updated_at: result.updated_at,
+    updated_by: result.updated_by,
+    header_photo_url: resolvePublicEmailImageUrl(
+      result.settings.branding.headerPhotoKey,
+      env.CLOUDFLARE_R2_PUBLIC_URL,
+    ),
+    current_logo_url: resolvePublicEmailImageUrl(
+      brandingData?.logo_url,
+      env.CLOUDFLARE_R2_PUBLIC_URL,
+    ),
+  });
+};
+
+const isEmailHeaderPhotoKey = (value: unknown): value is string =>
+  typeof value === 'string' &&
+  /^email-assets\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(?:jpg|png|webp)$/i.test(value);
+
+const deleteUnusedEmailHeaderPhoto = async (
+  env: Env,
+  supabase: SupabaseClient,
+  objectKey: string,
+): Promise<boolean> => {
+  const currentSettings = await readEmailSettings(supabase);
+  if (currentSettings.issue) throw new Error('Email settings could not be checked before photo cleanup.');
+  if (currentSettings.settings.branding.headerPhotoKey === objectKey) return false;
+  await deleteFromR2(env, objectKey, 'email-assets');
+  return true;
+};
+
+const uploadEmailHeaderPhoto = async (request: Request, env: Env): Promise<Response> => {
+  const auth = await requireAdmin(request, env, 'super_admin');
+  if (isResponse(auth)) return auth;
+  const body = await parseJson(request);
+  if (isResponse(body)) return body;
+  const image = decodeImage(body.image_file_base64, MAX_BRANDING_LOGO_HERO_IMAGE_BYTES);
+  if (isResponse(image)) return image;
+
+  const upload = await uploadToR2(env, image, 'email-assets');
+  if (isResponse(upload)) return upload;
+  const photoUrl = resolvePublicEmailImageUrl(upload.key, env.CLOUDFLARE_R2_PUBLIC_URL);
+  if (!photoUrl) {
+    try {
+      await deleteFromR2(env, upload.key, 'email-assets');
+    } catch (cleanupError) {
+      console.error('Email header photo uploaded with an invalid public URL and could not be cleaned up.', {
+        operation: 'admin.email_settings.photo_upload_cleanup',
+        error: messageOf(cleanupError),
+      });
+    }
+    return errorResponse('The configured R2 public URL is invalid for email photos.', 503);
+  }
+  return json({ object_key: upload.key, photo_url: photoUrl });
+};
+
+const deleteEmailHeaderPhoto = async (request: Request, env: Env): Promise<Response> => {
+  const auth = await requireAdmin(request, env, 'super_admin');
+  if (isResponse(auth)) return auth;
+  const objectKey = new URL(request.url).searchParams.get('key');
+  if (!isEmailHeaderPhotoKey(objectKey)) return errorResponse('Invalid email header photo key.', 400);
+
+  try {
+    const deleted = await deleteUnusedEmailHeaderPhoto(env, auth.supabase, objectKey);
+    if (!deleted) {
+      return errorResponse('The saved email header photo cannot be deleted before its settings are changed.', 409);
+    }
+    return json({ success: true });
+  } catch (error) {
+    if (messageOf(error) === 'Email settings could not be checked before photo cleanup.') {
+      return errorResponse(messageOf(error), 503);
+    }
+    console.error('Email header photo cleanup failed.', {
+      operation: 'admin.email_settings.photo_delete',
+      error: messageOf(error),
+    });
+    return errorResponse('The email header photo could not be removed from R2.', 502);
+  }
+};
+
+const saveEmailSettings = async (request: Request, env: Env): Promise<Response> => {
+  const auth = await requireAdmin(request, env, 'super_admin');
+  if (isResponse(auth)) return auth;
+  const body = await parseJson(request);
+  if (isResponse(body)) return body;
+  const settings = normalizeEmailSettings(body.settings);
+  if (!settings) return errorResponse('Email settings are invalid. Review the text, colors, email address, and HTTPS URLs.', 400);
+
+  const previousSettings = await readEmailSettings(auth.supabase);
+  if (previousSettings.issue) return errorResponse('Email settings could not be checked before saving.', 503);
+  const previousPhotoKey = previousSettings.settings.branding.headerPhotoKey;
+  const nextPhotoKey = settings.branding.headerPhotoKey;
+  if (nextPhotoKey && nextPhotoKey !== previousPhotoKey) {
+    const bucket = env.PUBLIC_MEDIA;
+    if (!bucket?.get) return errorResponse('Public R2 photo storage is unavailable for email photo validation.', 503);
+    try {
+      const uploadedPhoto = await bucket.get(nextPhotoKey);
+      if (!uploadedPhoto?.body ||
+        !['image/jpeg', 'image/png', 'image/webp'].includes(uploadedPhoto.httpMetadata?.contentType || '')) {
+        return errorResponse('The selected email header photo was not found or is not a supported image.', 400);
+      }
+      await uploadedPhoto.body.cancel();
+    } catch (photoVerificationError) {
+      console.error('Email header photo could not be verified in R2.', {
+        operation: 'admin.email_settings.photo_verify',
+        error: messageOf(photoVerificationError),
+      });
+      return errorResponse('The selected email header photo could not be verified in R2.', 502);
+    }
+  }
+
+  const { data, error } = await auth.supabase
+    .from('email_template_settings')
+    .upsert({
+      setting_key: 'default',
+      settings,
+      updated_at: new Date().toISOString(),
+      updated_by: auth.profile.id,
+    }, { onConflict: 'setting_key' })
+    .select('settings,updated_at,updated_by')
+    .single();
+  if (error || !data) {
+    console.error('Email settings could not be saved.', {
+      operation: 'admin.email_settings.save',
+      error_code: error?.code || 'database_write_failed',
+    });
+    return errorResponse('Email settings could not be saved. Check the database migration and try again.', 503);
+  }
+  const savedSettings = normalizeEmailSettings(data.settings);
+  if (!savedSettings) return errorResponse('Saved email settings could not be validated.', 500);
+  let photoCleanupWarning: string | undefined;
+  if (previousPhotoKey && previousPhotoKey !== savedSettings.branding.headerPhotoKey) {
+    try {
+      await deleteUnusedEmailHeaderPhoto(env, auth.supabase, previousPhotoKey);
+    } catch (cleanupError) {
+      console.error('Replaced email header photo could not be cleaned up.', {
+        operation: 'admin.email_settings.photo_replace_cleanup',
+        error: messageOf(cleanupError),
+      });
+      photoCleanupWarning = 'Settings were saved, but the previous photo could not be removed from R2.';
+    }
+  }
+  return json({
+    settings: savedSettings,
+    updated_at: data.updated_at,
+    updated_by: data.updated_by,
+    ...(photoCleanupWarning ? { photo_cleanup_warning: photoCleanupWarning } : {}),
+  });
+};
+
+const resetEmailSettings = async (request: Request, env: Env): Promise<Response> => {
+  const auth = await requireAdmin(request, env, 'super_admin');
+  if (isResponse(auth)) return auth;
+  const previousSettings = await readEmailSettings(auth.supabase);
+  if (previousSettings.issue) return errorResponse('Email settings could not be checked before restoring defaults.', 503);
+  const { data, error } = await auth.supabase
+    .from('email_template_settings')
+    .upsert({
+      setting_key: 'default',
+      settings: DEFAULT_EMAIL_SETTINGS,
+      updated_at: new Date().toISOString(),
+      updated_by: auth.profile.id,
+    }, { onConflict: 'setting_key' })
+    .select('settings,updated_at,updated_by')
+    .single();
+  if (error || !data) {
+    console.error('Default email settings could not be restored.', {
+      operation: 'admin.email_settings.reset',
+      error_code: error?.code || 'database_write_failed',
+    });
+    return errorResponse('Default email design could not be restored. Check the database migration and try again.', 503);
+  }
+  const settings = normalizeEmailSettings(data.settings);
+  if (!settings) return errorResponse('Restored default email settings could not be validated.', 500);
+  let photoCleanupWarning: string | undefined;
+  const previousPhotoKey = previousSettings.settings.branding.headerPhotoKey;
+  if (previousPhotoKey) {
+    try {
+      await deleteUnusedEmailHeaderPhoto(env, auth.supabase, previousPhotoKey);
+    } catch (cleanupError) {
+      console.error('Restored email defaults but could not clean up the previous header photo.', {
+        operation: 'admin.email_settings.photo_reset_cleanup',
+        error: messageOf(cleanupError),
+      });
+      photoCleanupWarning = 'Default settings were restored, but the previous photo could not be removed from R2.';
+    }
+  }
+  return json({
+    settings,
+    updated_at: data.updated_at,
+    updated_by: data.updated_by,
+    ...(photoCleanupWarning ? { photo_cleanup_warning: photoCleanupWarning } : {}),
+  });
 };
 
 const getOfficialDocumentSettings = async (
@@ -3634,6 +3991,14 @@ export async function handleApiRequest(request: Request, env: Env): Promise<Resp
     if (pathname === '/api/admin/callbacks' && method === 'GET') return adminTable(request, env, 'callback_requests', READ_COLUMNS.callbacks, 'created_at');
     if (pathname === '/api/admin/profiles' && method === 'GET') return adminTable(request, env, 'admin_profiles', READ_COLUMNS.profiles, 'created_at', true, 'super_admin');
     if (pathname === '/api/admin/branding' && method === 'PUT') return updateBranding(request, env);
+    if (pathname === '/api/admin/email-settings' && method === 'GET') return getEmailSettings(request, env);
+    if (pathname === '/api/admin/email-settings' && method === 'PUT') return saveEmailSettings(request, env);
+    if (pathname === '/api/admin/email-settings/reset' && method === 'POST') return resetEmailSettings(request, env);
+    if (pathname === '/api/admin/email-settings/header-photo') {
+      if (method === 'POST') return uploadEmailHeaderPhoto(request, env);
+      if (method === 'DELETE') return deleteEmailHeaderPhoto(request, env);
+      return methodNotAllowed(['POST', 'DELETE']);
+    }
     if (pathname === '/api/admin/official-document' && method === 'GET') {
       return getOfficialDocumentSettings(request, env);
     }
@@ -3677,6 +4042,9 @@ export async function handleApiRequest(request: Request, env: Env): Promise<Resp
         '/api/admin/callbacks': ['GET'],
         '/api/admin/profiles': ['GET'],
         '/api/admin/branding': ['PUT'],
+        '/api/admin/email-settings': ['GET', 'PUT'],
+        '/api/admin/email-settings/reset': ['POST'],
+        '/api/admin/email-settings/header-photo': ['POST', 'DELETE'],
         '/api/admin/official-document': ['GET', 'PUT'],
         '/api/admin/programs': ['GET', 'POST'],
         '/api/admin/announcements': ['GET', 'POST'],

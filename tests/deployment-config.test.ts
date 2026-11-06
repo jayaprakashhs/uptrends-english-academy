@@ -38,6 +38,25 @@ test('deploy script uses the Wrangler config actually emitted by Vite', () => {
   assert.match(serverSource, /app\.all\('\/api\/\*'/);
 });
 
+test('local Express server forwards all email settings and photo API routes to Worker dispatch', () => {
+  const routeBlock = serverSource.match(
+    /app\.all\(\s*\[([\s\S]*?)\],\s*dispatchWorkerApi,\s*\);/,
+  )?.[1];
+  assert.ok(routeBlock, 'Expected the Express Worker API route block.');
+  for (const route of [
+    '/api/admin/email-settings',
+    '/api/admin/email-settings/reset',
+    '/api/admin/email-settings/header-photo',
+  ]) {
+    assert.ok(routeBlock.includes(`'${route}'`), `Local Express does not forward ${route}`);
+  }
+  assert.match(workerApiSource, /pathname === '\/api\/admin\/email-settings' && method === 'GET'/);
+  assert.match(workerApiSource, /pathname === '\/api\/admin\/email-settings' && method === 'PUT'/);
+  assert.match(workerApiSource, /pathname === '\/api\/admin\/email-settings\/header-photo'/);
+  assert.match(workerApiSource, /if \(method === 'POST'\) return uploadEmailHeaderPhoto\(request, env\)/);
+  assert.match(workerApiSource, /if \(method === 'DELETE'\) return deleteEmailHeaderPhoto\(request, env\)/);
+});
+
 test('public SEO files list only the canonical public homepage and identify the sitemap', () => {
   assert.match(sitemap, /^<\?xml version="1\.0" encoding="UTF-8"\?>/);
   assert.match(sitemap, /<urlset xmlns="http:\/\/www\.sitemaps\.org\/schemas\/sitemap\/0\.9">/);
