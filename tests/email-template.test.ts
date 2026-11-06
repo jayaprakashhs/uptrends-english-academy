@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { renderBrandedEmail } from '../email-template';
 
-test('renders a premium branded header with the saved public logo and academy colors', () => {
+test('renders the reference header, fixed navy and orange palette, and dynamic notification content', () => {
   const email = renderBrandedEmail(
     {
       title: 'Application Received',
@@ -14,49 +14,63 @@ test('renders a premium branded header with the saved public logo and academy co
     {
       academyName: 'Uptrend Academy',
       logoUrl: 'branding/main-logo.png',
-      primaryGreen: '#14532d',
-      primaryOrange: '#ea580c',
+      primaryGreen: '#16a34a',
+      primaryOrange: '#16a34a',
       publicAssetBaseUrl: 'https://assets.example',
     },
   );
 
   assert.match(email.html, /src="https:\/\/assets\.example\/branding\/main-logo\.png"/);
-  assert.match(email.html, /alt="Uptrend Academy logo"/);
+  assert.match(email.html, /alt="Uptrend Academy official logo"/);
   assert.match(email.html, /align="center"/);
-  assert.match(email.html, /width="176"[^>]+height:auto/);
+  assert.match(email.html, /width="184"[^>]+height:auto/);
+  assert.match(email.html, /email-header-waves\.png/);
+  assert.match(email.html, /DAVANGERE - KARNATAKA/);
+  assert.match(email.html, /color:#123B78/);
+  assert.match(email.html, /#EAF3FF/);
+  assert.match(email.html, /#FF6B00/);
+  assert.doesNotMatch(email.html, /background-color:#(?:14532d|16a34a|ecfdf5)/i);
   assert.match(email.html, /<h1[^>]*>Application Received<\/h1>/);
-  assert.match(email.html, /background-color:#14532d/);
-  assert.match(email.html, /border-bottom:4px solid #ea580c/);
   assert.match(email.html, /ACADEMY NOTIFICATION/);
   assert.match(email.html, /border-radius:10px/);
   assert.match(email.html, /STATUS&nbsp;&nbsp;<\/strong>Awaiting review/);
+  assert.match(email.html, /background-color:#FFF3E8/);
   assert.match(email.html, /Application Reference/);
   assert.match(email.html, /href="https:\/\/uptrendsenglishacademy\.in"/);
-  assert.match(email.html, /Visit the academy website/);
   assert.match(email.html, /class="detail-label"/);
   assert.match(email.html, /max-width:620px/);
   assert.match(email.text, /Application Received/);
   assert.match(email.text, /Status: Awaiting review/);
   assert.match(email.text, /Application Reference: UEA-APP-2026-0001/);
   assert.match(email.text, /https:\/\/uptrendsenglishacademy\.in/);
-  assert.match(email.text, /Davangere, Karnataka, India/);
+  assert.match(email.text, /Davangere, Karnataka/);
 });
 
-test('uses the dynamic academy name in the branded footer and meaningful text alternative', () => {
+test('renders the compact branded footer with contact links, slogan, copyright, and disclaimer', () => {
   const email = renderBrandedEmail({ title: 'Application Received' });
 
   assert.match(email.html, /Uptrend&#39;s English Academy/);
   assert.match(email.html, /Warm regards/);
-  assert.match(email.html, /This is an official notification/);
+  assert.match(email.html, /border-top:3px solid #123B78/);
+  assert.match(email.html, /background-color:#F4F7FC/);
+  assert.match(email.html, /Learn English for a Brighter Tomorrow\.\.\./);
+  assert.match(email.html, /Davangere, Karnataka/);
+  assert.match(email.html, /href="mailto:uptrendsinstitute@gmail\.com"/);
+  assert.match(email.html, /href="tel:\+919008000211"/);
+  assert.match(email.html, /\+91 9008000211/);
+  assert.match(email.html, /Copyright &copy; \d{4} Uptrend&#39;s English Academy/);
+  assert.match(email.html, /This is an automated email\. Please do not reply directly to this message\./);
   assert.doesNotMatch(email.html, /bimi-logo\.svg/);
   assert.doesNotMatch(email.html, /Spoken English \| Grammar \| Kids English/);
-  assert.match(email.html, /Davangere, Karnataka/);
   assert.match(email.html, /href="https:\/\/uptrendsenglishacademy\.in"/);
   assert.match(email.text, /Visit the academy: https:\/\/uptrendsenglishacademy\.in/);
+  assert.match(email.text, /Email: uptrendsinstitute@gmail\.com/);
+  assert.match(email.text, /Phone: \+91 9008000211/);
   assert.match(email.text, /Uptrend's English Academy/);
+  assert.match(email.text, /automated email/);
 });
 
-test('falls back to the dynamic academy name instead of a hardcoded logo when the logo is missing or unsafe', () => {
+test('falls back to the existing official logo when the configured logo is missing or unsafe', () => {
   for (const logoUrl of [null, 'http://assets.example/logo.png', 'https://private.r2.cloudflarestorage.com/logo.png']) {
     const email = renderBrandedEmail(
       { title: 'New Request' },
@@ -65,24 +79,18 @@ test('falls back to the dynamic academy name instead of a hardcoded logo when th
 
     assert.match(email.html, /Configured Academy/);
     assert.doesNotMatch(email.html, /src="http:\/\/assets\.example\/logo\.png"/);
-    assert.doesNotMatch(email.html, /<img[^>]+src=/);
+    assert.match(email.html, /src="https:\/\/gpnfznwqwaokfzmozpxo\.supabase\.co\/storage\/v1\/object\/public\/Uptrend&#39;s%20English%20Academy-photos\/main_logo\/UEA_main_02\.png"/);
   }
 });
 
 test('renders status indicators using the configured brand palette', () => {
-  const approved = renderBrandedEmail({ title: 'Approved', status: 'Approved' }, {
-    primaryGreen: '#176b48',
-    primaryOrange: '#f57400',
-  });
-  const pending = renderBrandedEmail({ title: 'Request Received', status: 'Pending' }, {
-    primaryGreen: '#176b48',
-    primaryOrange: '#f57400',
-  });
+  const approved = renderBrandedEmail({ title: 'Approved', status: 'Approved' });
+  const pending = renderBrandedEmail({ title: 'Request Received', status: 'Pending' });
 
-  assert.match(approved.html, /background-color:#ecfdf5/);
-  assert.match(approved.html, /color:#176b48/);
-  assert.match(pending.html, /background-color:#fff7ed/);
-  assert.match(pending.html, /color:#f57400/);
+  assert.match(approved.html, /background-color:#EAF3FF/);
+  assert.match(approved.html, /color:#123B78/);
+  assert.match(pending.html, /background-color:#FFF3E8/);
+  assert.match(pending.html, /color:#FF6B00/);
 });
 
 test('escapes dynamic email content and emits a plain-text alternative', () => {
