@@ -158,6 +158,114 @@ const supabaseErrorCategory = (error: unknown): string => {
   return 'database_query_failed';
 };
 
+const logDemoClassInsertFailure = (error: unknown, saved: unknown): void => {
+  const details = error && typeof error === 'object'
+    ? error as { code?: unknown; column?: unknown; constraint?: unknown; message?: unknown }
+    : {};
+  const rawCode = typeof details.code === 'string' ? details.code : '';
+  const errorCode = /^[A-Z0-9]{1,16}$/.test(rawCode) ? rawCode : null;
+  const message = typeof details.message === 'string' ? details.message : '';
+  const identifierFrom = (value: unknown, kind: 'column' | 'constraint'): string | undefined => {
+    const candidate = typeof value === 'string'
+      ? value
+      : message.match(new RegExp(`${kind} ["']([A-Za-z_][A-Za-z0-9_$]{0,62})["']`, 'i'))?.[1];
+    return candidate && /^[A-Za-z_][A-Za-z0-9_$]{0,62}$/.test(candidate)
+      ? candidate
+      : undefined;
+  };
+  const constraint = identifierFrom(details.constraint, 'constraint');
+  const column = identifierFrom(details.column, 'column');
+  let errorCategory = 'database_error';
+  if (!error) {
+    errorCategory = 'missing_inserted_row';
+  } else if (errorCode === '42501') {
+    errorCategory = 'permission_denied';
+  } else if (errorCode === '23502') {
+    errorCategory = 'not_null_violation';
+  } else if (errorCode === '23503') {
+    errorCategory = 'foreign_key_violation';
+  } else if (errorCode === '23505') {
+    errorCategory = 'unique_violation';
+  } else if (errorCode === '23514') {
+    errorCategory = 'check_violation';
+  } else if (errorCode === 'PGRST116') {
+    errorCategory = 'no_rows_returned';
+  } else if (errorCode?.startsWith('23')) {
+    errorCategory = 'integrity_constraint_violation';
+  } else if (errorCode?.startsWith('22')) {
+    errorCategory = 'invalid_data';
+  } else if (errorCode?.startsWith('42')) {
+    errorCategory = 'schema_or_query_error';
+  } else if (errorCode?.startsWith('PGRST')) {
+    errorCategory = 'postgrest_error';
+  }
+
+  console.error(JSON.stringify({
+    event: 'demo_class_request_insert_failed',
+    operation: 'demo_class_requests.submit',
+    error_code: errorCode,
+    error_category: errorCategory,
+    ...(constraint ? { constraint } : {}),
+    ...(column ? { column } : {}),
+    insert_error: Boolean(error),
+    missing_inserted_row: !saved,
+  }));
+};
+
+const logCallbackInsertFailure = (error: unknown, saved: unknown): void => {
+  const details = error && typeof error === 'object'
+    ? error as { code?: unknown; column?: unknown; constraint?: unknown; message?: unknown }
+    : {};
+  const rawCode = typeof details.code === 'string' ? details.code : '';
+  const errorCode = /^[A-Z0-9]{1,16}$/.test(rawCode) ? rawCode : null;
+  const message = typeof details.message === 'string' ? details.message : '';
+  const identifierFrom = (value: unknown, kind: 'column' | 'constraint'): string | undefined => {
+    const candidate = typeof value === 'string'
+      ? value
+      : message.match(new RegExp(`${kind} ["']([A-Za-z_][A-Za-z0-9_$]{0,62})["']`, 'i'))?.[1];
+    return candidate && /^[A-Za-z_][A-Za-z0-9_$]{0,62}$/.test(candidate)
+      ? candidate
+      : undefined;
+  };
+  const constraint = identifierFrom(details.constraint, 'constraint');
+  const column = identifierFrom(details.column, 'column');
+  let errorCategory = 'database_error';
+  if (!error) {
+    errorCategory = 'missing_inserted_row';
+  } else if (errorCode === '42501') {
+    errorCategory = 'permission_denied';
+  } else if (errorCode === '23502') {
+    errorCategory = 'not_null_violation';
+  } else if (errorCode === '23503') {
+    errorCategory = 'foreign_key_violation';
+  } else if (errorCode === '23505') {
+    errorCategory = 'unique_violation';
+  } else if (errorCode === '23514') {
+    errorCategory = 'check_violation';
+  } else if (errorCode === 'PGRST116') {
+    errorCategory = 'no_rows_returned';
+  } else if (errorCode?.startsWith('23')) {
+    errorCategory = 'integrity_constraint_violation';
+  } else if (errorCode?.startsWith('22')) {
+    errorCategory = 'invalid_data';
+  } else if (errorCode?.startsWith('42')) {
+    errorCategory = 'schema_or_query_error';
+  } else if (errorCode?.startsWith('PGRST')) {
+    errorCategory = 'postgrest_error';
+  }
+
+  console.error(JSON.stringify({
+    event: 'callback_request_insert_failed',
+    operation: 'callbacks.submit',
+    error_code: errorCode,
+    error_category: errorCategory,
+    ...(constraint ? { constraint } : {}),
+    ...(column ? { column } : {}),
+    insert_error: Boolean(error),
+    missing_inserted_row: !saved,
+  }));
+};
+
 const checkSupabaseHealth = async (env: Env): Promise<IntegrationHealth> => {
   const configured = Boolean(getSupabaseUrl(env) && env.SUPABASE_SERVICE_ROLE_KEY);
   const client = getSupabaseClient(env, true, 'system_status.supabase');
@@ -2080,6 +2188,7 @@ const submitDemoClassRequest = async (request: Request, env: Env): Promise<Respo
     .select('id')
     .single();
   if (insertError || !saved) {
+    logDemoClassInsertFailure(insertError, saved);
     return errorResponse('Unable to save the demo class request. Please try again.', 500);
   }
 
@@ -2161,6 +2270,7 @@ const submitCallback = async (request: Request, env: Env): Promise<Response> => 
     .select('id')
     .single();
   if (error || !saved) {
+    logCallbackInsertFailure(error, saved);
     return errorResponse('Failed to record callback request. Please try again.', 500);
   }
 

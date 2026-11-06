@@ -136,11 +136,21 @@ async function submitPublicContact(
   path: string,
   body: Record<string, unknown>,
   duplicateCheck: (payload: Record<string, unknown>) => Response | Promise<Response> = () => Response.json(false),
-  options: { insertDuplicate?: boolean; insertFailure?: boolean; notificationLogFailure?: boolean; cleanupFailure?: boolean } = {},
+  options: {
+    insertDuplicate?: boolean;
+    insertFailure?: boolean;
+    insertFailureResponse?: { status: number; body: Record<string, unknown> };
+    callbackInsertNoRow?: boolean;
+    captureErrorLogs?: boolean;
+    notificationLogFailure?: boolean;
+    cleanupFailure?: boolean;
+  } = {},
 ) {
   const originalFetch = globalThis.fetch;
+  const originalConsoleError = console.error;
   const applicationMedia = mockR2Bucket({ deleteError: options.cleanupFailure });
   const duplicateCheckPayloads: Array<Record<string, unknown>> = [];
+  const errorLogs: string[] = [];
   const insertedRecords: Array<{ path: string; body: Record<string, unknown>; id: string }> = [];
   const applicationReferences: string[] = [];
   const applicationNotifications: Array<Record<string, unknown>> = [];
@@ -176,7 +186,14 @@ async function submitPublicContact(
       return new Response(null, { status: request.method === 'POST' ? 201 : 204 });
     }
     if (options.insertFailure && url.pathname === '/rest/v1/callback_requests') {
-      return Response.json({ code: 'XX000', message: 'database unavailable' }, { status: 500 });
+      const failure = options.insertFailureResponse || {
+        status: 500,
+        body: { code: 'XX000', message: 'database unavailable' },
+      };
+      return Response.json(failure.body, { status: failure.status });
+    }
+    if (options.callbackInsertNoRow && url.pathname === '/rest/v1/callback_requests') {
+      return Response.json(null, { status: 201 });
     }
     if (url.pathname.startsWith('/rest/v1/') && request.method === 'POST') {
       if (options.insertDuplicate && url.pathname === '/rest/v1/applications') {
@@ -204,6 +221,10 @@ async function submitPublicContact(
     throw new Error(`Unexpected test request: ${url.hostname}${url.pathname}`);
   };
 
+  if (options.captureErrorLogs) {
+    console.error = (...values: unknown[]) => errorLogs.push(values.map(String).join(' '));
+  }
+
   try {
     const response = await handleApiRequest(
       new Request(`https://academy.example${path}`, {
@@ -218,9 +239,10 @@ async function submitPublicContact(
         APPLICATION_MEDIA: applicationMedia.binding,
       },
     );
-    return { response, duplicateCheckPayloads, insertedRecords, applicationReferences, applicationMedia, applicationNotifications, sentEmails };
+    return { response, duplicateCheckPayloads, insertedRecords, applicationReferences, applicationMedia, applicationNotifications, sentEmails, errorLogs };
   } finally {
     globalThis.fetch = originalFetch;
+    console.error = originalConsoleError;
   }
 }
 
@@ -1853,12 +1875,59 @@ test('saved application remains successful when notification outbox insertion fa
 test('callback submission returns an error and does not acknowledge success when database insert fails', async () => {
   const submission = publicContactSubmissions.find(({ path }) => path === '/api/callback-request');
   assert.ok(submission);
-  const result = await submitPublicContact(submission.path, submission.body, undefined, { insertFailure: true });
+  const result = await submitPublicContact(submission.path, submission.body, undefined, {
+    insertFailure: true,
+    insertFailureResponse: {
+      status: 400,
+      body: {
+        code: '23514',
+        message: 'new row violates check constraint "callback_requests_status_check"',
+        constraint: 'callback_requests_status_check',
+        column: 'status',
+        details: 'Sensitive Caller, 9876543210, caller@example.com, private message',
+      },
+    },
+    captureErrorLogs: true,
+  });
   assert.equal(result.response.status, 500);
   assert.deepEqual(await result.response.json(), {
     error: 'Failed to record callback request. Please try again.',
   });
   assert.equal(result.insertedRecords.length, 0);
+  assert.equal(result.errorLogs.length, 1);
+  assert.deepEqual(JSON.parse(result.errorLogs[0]), {
+    event: 'callback_request_insert_failed',
+    operation: 'callbacks.submit',
+    error_code: '23514',
+    error_category: 'check_violation',
+    constraint: 'callback_requests_status_check',
+    column: 'status',
+    insert_error: true,
+    missing_inserted_row: true,
+  });
+  assert.doesNotMatch(result.errorLogs[0], /Sensitive Caller|9876543210|caller@example\.com|private message/);
+});
+
+test('callback submission logs a missing inserted row without changing the public error response', async () => {
+  const submission = publicContactSubmissions.find(({ path }) => path === '/api/callback-request');
+  assert.ok(submission);
+  const result = await submitPublicContact(submission.path, submission.body, undefined, {
+    callbackInsertNoRow: true,
+    captureErrorLogs: true,
+  });
+
+  assert.equal(result.response.status, 500);
+  assert.deepEqual(await result.response.json(), {
+    error: 'Failed to record callback request. Please try again.',
+  });
+  assert.equal(result.errorLogs.length, 1);
+  const diagnostic = JSON.parse(result.errorLogs[0]);
+  assert.equal(diagnostic.event, 'callback_request_insert_failed');
+  assert.equal(diagnostic.operation, 'callbacks.submit');
+  assert.equal(diagnostic.error_category, 'missing_inserted_row');
+  assert.equal(diagnostic.insert_error, false);
+  assert.equal(diagnostic.missing_inserted_row, true);
+  assert.doesNotMatch(result.errorLogs[0], /Test Student|9876543210|student@example\.com/);
 });
 
 test('callback and demo requests allow repeated contact details as independent records', async () => {

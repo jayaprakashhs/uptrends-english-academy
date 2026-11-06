@@ -33,6 +33,36 @@ const requestBase = {
   additional_information: '',
 };
 
+const submitDemoRequestWithInsertResponse = async (insertResponse: Response) => {
+  const previousFetch = globalThis.fetch;
+  const previousConsoleError = console.error;
+  const logs: string[] = [];
+  globalThis.fetch = async (input, init) => {
+    const request = input instanceof Request ? input : new Request(input, init);
+    const url = new URL(request.url);
+    if (url.hostname === 'supabase.example' && url.pathname === '/rest/v1/demo_class_requests') {
+      return insertResponse;
+    }
+    throw new Error(`Unexpected request in demo insert failure test: ${url.hostname}${url.pathname}`);
+  };
+  console.error = (...values: unknown[]) => logs.push(values.map(String).join(' '));
+
+  try {
+    const response = await handleApiRequest(new Request('https://academy.example/api/demo-class-requests', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBase),
+    }), {
+      SUPABASE_URL: 'https://supabase.example',
+      SUPABASE_SERVICE_ROLE_KEY: 'test-service-role-key',
+    });
+    return { response, logs };
+  } finally {
+    globalThis.fetch = previousFetch;
+    console.error = previousConsoleError;
+  }
+};
+
 test('validates Indian mobile number formats', () => {
   assert.equal(isValidIndianMobileNumber('+91 90000 00000'), true);
   assert.equal(isValidIndianMobileNumber('09000000000'), true);
@@ -233,4 +263,48 @@ test('stores demo requests separately and sends independent applicant and academ
   } finally {
     globalThis.fetch = previousFetch;
   }
+});
+
+test('demo insert errors log sanitized database diagnostics and preserve the public error response', async () => {
+  const result = await submitDemoRequestWithInsertResponse(Response.json({
+    code: '23514',
+    message: 'new row violates check constraint "demo_class_requests_status_check"',
+    column: 'status',
+    details: 'Sensitive Applicant Name, 9876543210, applicant@example.com, 2000-01-01, 1 Private Street',
+  }, { status: 400 }));
+
+  assert.equal(result.response.status, 500);
+  assert.deepEqual(await result.response.json(), {
+    error: 'Unable to save the demo class request. Please try again.',
+  });
+  assert.equal(result.logs.length, 1);
+  assert.deepEqual(JSON.parse(result.logs[0]), {
+    event: 'demo_class_request_insert_failed',
+    operation: 'demo_class_requests.submit',
+    error_code: '23514',
+    error_category: 'check_violation',
+    constraint: 'demo_class_requests_status_check',
+    column: 'status',
+    insert_error: true,
+    missing_inserted_row: true,
+  });
+  assert.doesNotMatch(result.logs[0], /Sensitive Applicant Name|9876543210|applicant@example\.com|2000-01-01|1 Private Street/);
+});
+
+test('demo insert with no returned row logs the PostgREST result without exposing database details', async () => {
+  const result = await submitDemoRequestWithInsertResponse(Response.json(null, { status: 201 }));
+
+  assert.equal(result.response.status, 500);
+  assert.deepEqual(await result.response.json(), {
+    error: 'Unable to save the demo class request. Please try again.',
+  });
+  assert.equal(result.logs.length, 1);
+  const diagnostic = JSON.parse(result.logs[0]);
+  assert.equal(diagnostic.event, 'demo_class_request_insert_failed');
+  assert.equal(diagnostic.operation, 'demo_class_requests.submit');
+  assert.equal(diagnostic.error_code, null);
+  assert.equal(diagnostic.error_category, 'missing_inserted_row');
+  assert.equal(diagnostic.insert_error, false);
+  assert.equal(diagnostic.missing_inserted_row, true);
+  assert.doesNotMatch(result.logs[0], /Test Applicant|9876543210|applicant@example\.com|1 Test Street/);
 });
