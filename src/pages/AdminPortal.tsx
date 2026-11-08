@@ -390,6 +390,12 @@ useEffect(() => {
 
   // Selected item modal preview states
   const [selectedApp, setSelectedApp] = useState<StudentApplication | null>(null);
+  const [resendingOfficialPdfId, setResendingOfficialPdfId] = useState<string | null>(null);
+  const [resendOfficialPdfMessage, setResendOfficialPdfMessage] = useState<{
+    type: 'success' | 'error';
+    text: string;
+  } | null>(null);
+  const resendingOfficialPdfIdsRef = useRef(new Set<string>());
   const [deleteApplicationCandidate, setDeleteApplicationCandidate] = useState<StudentApplication | null>(null);
   const [deleteConfirmation, setDeleteConfirmation] = useState('');
   const [deletingApplicationId, setDeletingApplicationId] = useState<string | null>(null);
@@ -540,6 +546,7 @@ useEffect(() => {
 
   const openApplicationReview = (application: StudentApplication) => {
     selectedApplicationIdRef.current = application.id;
+    setResendOfficialPdfMessage(null);
     setJoiningInformationSaveStatus('idle');
     setApplicationJoiningInfo(normalizeJoiningInformation(
       joiningInformationDraftsRef.current.get(application.id) ?? application.joining_information,
@@ -999,6 +1006,35 @@ const resetOfficialDocumentSettings = () => {
       setActionMessage({ type: 'error', text: err.message || 'Error approving application.' });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleResendOfficialPdf = async (appId: string) => {
+    if (resendingOfficialPdfIdsRef.current.has(appId)) return;
+    resendingOfficialPdfIdsRef.current.add(appId);
+    setResendingOfficialPdfId(appId);
+    setResendOfficialPdfMessage(null);
+    try {
+      const response = await fetchAdmin(`/api/admin/applications/${appId}/resend-official-pdf`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(data?.error || 'Unable to resend the Official Admission Approval PDF.');
+      }
+      setResendOfficialPdfMessage({
+        type: 'success',
+        text: data?.message || 'Official Admission Approval PDF sent successfully.',
+      });
+    } catch (error) {
+      setResendOfficialPdfMessage({
+        type: 'error',
+        text: error instanceof Error ? error.message : 'Unable to resend the Official Admission Approval PDF.',
+      });
+    } finally {
+      resendingOfficialPdfIdsRef.current.delete(appId);
+      setResendingOfficialPdfId((current) => current === appId ? null : current);
     }
   };
 
@@ -4608,7 +4644,17 @@ const res = await fetchAdmin(url, {
                 {selectedApp.status === 'Accepted' && (
                   <button
                     type="button"
-                    disabled={loading}
+                    disabled={resendingOfficialPdfId === selectedApp.id}
+                    onClick={() => void handleResendOfficialPdf(selectedApp.id)}
+                    className="min-h-10 rounded-xl bg-[#123B78] px-4 py-2 text-xs font-bold text-white hover:bg-[#0B2D60] disabled:cursor-wait disabled:opacity-60"
+                  >
+                    {resendingOfficialPdfId === selectedApp.id ? 'Sending Official PDF?' : 'Resend Official PDF'}
+                  </button>
+                )}
+                {selectedApp.status === 'Accepted' && (
+                  <button
+                    type="button"
+                    disabled={loading || resendingOfficialPdfId === selectedApp.id}
                     onClick={() => handleMarkApplicationPending(selectedApp.id)}
                     className="px-4 py-2 bg-amber-100 hover:bg-amber-200 text-amber-800 font-bold text-xs rounded-xl disabled:opacity-50"
                   >
@@ -4617,6 +4663,17 @@ const res = await fetchAdmin(url, {
                 )}
               </div>
             </div>
+            {selectedApp.status === 'Accepted' && resendOfficialPdfMessage && (
+              <p
+                role="status"
+                aria-live="polite"
+                className={`mt-2 text-xs font-semibold ${
+                  resendOfficialPdfMessage.type === 'success' ? 'text-emerald-700' : 'text-rose-700'
+                }`}
+              >
+                {resendOfficialPdfMessage.text}
+              </p>
+            )}
           </div>
         </div>
       )}

@@ -2539,11 +2539,41 @@ const approveApplication = async (request: Request, env: Env): Promise<Response>
       student_id: application.student_id,
     });
   }
+  const attemptId = crypto.randomUUID();
+  const attemptInsert = await auth.supabase.from('official_document_email_attempts').insert({
+    id: attemptId,
+    application_id: applicationId,
+    recipient_email: approvalEmail.to,
+    action_type: 'approval',
+    attempted_by: auth.profile.id,
+  });
+  if (attemptInsert.error) {
+    console.error('Unable to record the official approval email attempt.', {
+      operation: 'applications.approve.email_attempt',
+      error_code: attemptInsert.error.code || 'database_query_failed',
+    });
+    return errorResponse('The application was approved, but its email attempt could not be recorded or sent.', 503);
+  }
   const emailResult = await sendEmail(env, {
     ...approvalEmail,
     templateKey: 'admission_approved',
     idempotencyKey: `student-approval-${applicationId}`,
   });
+  const attemptUpdate = await auth.supabase
+    .from('official_document_email_attempts')
+    .update({
+      result: emailResult.success ? 'success' : 'failure',
+      failure_code: emailResult.success ? null : 'email_delivery_failed',
+      completed_at: new Date().toISOString(),
+    })
+    .eq('id', attemptId);
+  if (attemptUpdate.error) {
+    console.error('Unable to record the official approval email result.', {
+      operation: 'applications.approve.email_attempt_result',
+      error_code: attemptUpdate.error.code || 'database_query_failed',
+    });
+    return errorResponse('The approval email was processed, but its attempt result could not be recorded.', 503);
+  }
   const notificationUpdate = {
     status: emailResult.success ? 'Sent' : 'Failed',
     provider_message_id: emailResult.provider_message_id,
@@ -2583,6 +2613,145 @@ const approveApplication = async (request: Request, env: Env): Promise<Response>
   );
   if (isResponse(approvalDelivery)) return approvalDelivery;
   return approvalDelivery;
+};
+
+const resendOfficialApprovalPdf = async (
+  request: Request,
+  env: Env,
+  applicationId: string,
+): Promise<Response> => {
+  const auth = await requireAdmin(request, env, 'staff');
+  if (isResponse(auth)) return auth;
+  if (!validId(applicationId)) return errorResponse('Application ID must be a valid UUID.', 400);
+
+  return withApplicationErasureWriteLease(auth.supabase, applicationId, async () => {
+    const { data: application, error: applicationError } = await auth.supabase
+      .from('applications')
+      .select('id,status,email')
+      .eq('id', applicationId)
+      .maybeSingle();
+    if (applicationError) {
+      console.error('Unable to load the application for official PDF resend.', {
+        operation: 'applications.official_pdf_resend.application_read',
+        error_code: applicationError.code || 'database_query_failed',
+      });
+      return errorResponse('Unable to load this application for PDF resend.', 503);
+    }
+    if (!application) return errorResponse('Application not found.', 404);
+    if (application.status !== 'Accepted') {
+      return errorResponse('The Official PDF can only be resent for an approved application.', 409);
+    }
+    if (typeof application.email !== 'string' || !application.email.trim()) {
+      return errorResponse('This application has no registered email address.', 422);
+    }
+
+    const attemptId = crypto.randomUUID();
+    const recipientEmail = application.email.trim();
+    const attemptInsert = await auth.supabase.from('official_document_email_attempts').insert({
+      id: attemptId,
+      application_id: applicationId,
+      recipient_email: recipientEmail,
+      action_type: 'resend_official_pdf',
+      attempted_by: auth.profile.id,
+    });
+    if (attemptInsert.error) {
+      console.error('Unable to record the official PDF resend attempt.', {
+        operation: 'applications.official_pdf_resend.attempt',
+        error_code: attemptInsert.error.code || 'database_query_failed',
+      });
+      return errorResponse('The resend attempt could not be recorded, so no email was sent.', 503);
+    }
+
+    const failAttempt = async (failureCode: string, response: Response): Promise<Response> => {
+      const { error } = await auth.supabase
+        .from('official_document_email_attempts')
+        .update({
+          result: 'failure',
+          failure_code: failureCode,
+          completed_at: new Date().toISOString(),
+        })
+        .eq('id', attemptId);
+      if (error) {
+        console.error('Unable to record the official PDF resend failure.', {
+          operation: 'applications.official_pdf_resend.result',
+          error_code: error.code || 'database_query_failed',
+        });
+        return errorResponse('The PDF resend failed, and its result could not be recorded.', 503);
+      }
+      return response;
+    };
+
+    const { data: issuance, error: issuanceError } = await auth.supabase
+      .from('official_document_issuances')
+      .select('snapshot')
+      .eq('application_id', applicationId)
+      .eq('issuance_type', 'approval')
+      .order('version_number', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (issuanceError) {
+      console.error('Unable to load the approved document snapshot for resend.', {
+        operation: 'applications.official_pdf_resend.issuance_read',
+        error_code: issuanceError.code || 'database_query_failed',
+      });
+      return failAttempt('issuance_read_failed', errorResponse('Unable to load the approved document for resend.', 503));
+    }
+    if (!issuance?.snapshot || typeof issuance.snapshot !== 'object' || Array.isArray(issuance.snapshot)) {
+      return failAttempt('issuance_missing', errorResponse('No approved official document is available to resend.', 404));
+    }
+
+    const settings = await loadOfficialDocumentSettings(auth.supabase);
+    if (isResponse(settings)) return failAttempt('settings_read_failed', settings);
+    const sourceSnapshot = issuance.snapshot as Record<string, unknown>;
+    const sourceApplication = sourceSnapshot.application;
+    if (!sourceApplication || typeof sourceApplication !== 'object' || Array.isArray(sourceApplication)) {
+      return failAttempt('snapshot_invalid', errorResponse('The approved document snapshot is incomplete.', 500));
+    }
+    const resendSnapshot = {
+      ...sourceSnapshot,
+      document_settings: settings,
+      application: {
+        ...(sourceApplication as Record<string, unknown>),
+        email: recipientEmail,
+      },
+    };
+    const pdfBytes = await generatePdfFromSnapshot(env, resendSnapshot);
+    if (isResponse(pdfBytes)) return failAttempt('pdf_generation_failed', pdfBytes);
+    const approvalEmail = buildApprovalEmail(resendSnapshot, pdfBytes);
+    if (isResponse(approvalEmail)) return failAttempt('email_content_invalid', approvalEmail);
+
+    const emailResult = await sendEmail(env, {
+      ...approvalEmail,
+      templateKey: 'admission_approved',
+    });
+    const { error: attemptUpdateError } = await auth.supabase
+      .from('official_document_email_attempts')
+      .update({
+        result: emailResult.success ? 'success' : 'failure',
+        failure_code: emailResult.success ? null : 'email_delivery_failed',
+        completed_at: new Date().toISOString(),
+      })
+      .eq('id', attemptId);
+    if (attemptUpdateError) {
+      console.error('Unable to record the official PDF resend result.', {
+        operation: 'applications.official_pdf_resend.result',
+        error_code: attemptUpdateError.code || 'database_query_failed',
+      });
+      return errorResponse('The email was processed, but its resend result could not be recorded.', 503);
+    }
+    if (!emailResult.success) {
+      return errorResponse(
+        'Unable to resend the Official Admission Approval PDF. Email delivery was not confirmed; you can safely try again.',
+        502,
+      );
+    }
+    return json({
+      success: true,
+      message: 'Official Admission Approval PDF sent successfully.',
+      email_status: 'Sent',
+      attempt_id: attemptId,
+    });
+  });
 };
 
 const updateProfile = async (request: Request, env: Env, id: string): Promise<Response> => {
@@ -3870,6 +4039,13 @@ export async function handleApiRequest(request: Request, env: Env): Promise<Resp
     if (pathname === '/api/demo-class-requests' && method === 'POST') return submitDemoClassRequest(request, env);
     if (pathname === '/api/callback-request' && method === 'POST') return submitCallback(request, env);
     if (pathname === '/api/approve-application' && method === 'POST') return approveApplication(request, env);
+    const officialPdfResendRoute = pathname.match(
+      /^\/api\/admin\/applications\/([^/]+)\/resend-official-pdf$/,
+    );
+    if (officialPdfResendRoute) {
+      if (method === 'POST') return resendOfficialApprovalPdf(request, env, officialPdfResendRoute[1]);
+      return methodNotAllowed(['POST']);
+    }
 
     if (pathname === '/api/admin/programs') {
       if (method === 'GET') return adminTable(request, env, 'programs', READ_COLUMNS.programs, 'display_order', true, 'admin');

@@ -1636,6 +1636,7 @@ app.all(
   [
     '/api/admin/applications',
     '/api/admin/applications/:id',
+    '/api/admin/applications/:id/resend-official-pdf',
     '/api/admin/application-erasure-jobs/:id',
     '/api/demo-class-requests',
     '/api/admin/demo-class-requests',

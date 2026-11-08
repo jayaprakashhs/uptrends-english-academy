@@ -355,6 +355,21 @@ test('official document setting-key migration allows only the intended existing 
   assert.doesNotMatch(keyMigration, /DELETE\s+FROM|TRUNCATE|DROP TABLE/i);
 });
 
+test('official document email attempt migration stores per-attempt records for server-side use', async () => {
+  const migration = await readFile(
+    new URL('../supabase/migrations/20261106000003_official_document_email_attempts.sql', import.meta.url),
+    'utf8',
+  );
+  assert.match(migration, /CREATE TABLE IF NOT EXISTS public\.official_document_email_attempts/i);
+  assert.match(migration, /application_id uuid NOT NULL[\s\S]*REFERENCES public\.applications\(id\) ON DELETE CASCADE/i);
+  assert.match(migration, /recipient_email text NOT NULL/i);
+  assert.match(migration, /action_type IN \('approval', 'resend_official_pdf'\)/i);
+  assert.match(migration, /attempted_at timestamptz NOT NULL DEFAULT now\(\)/i);
+  assert.match(migration, /result IN \('pending', 'success', 'failure'\)/i);
+  assert.match(migration, /REVOKE ALL ON TABLE public\.official_document_email_attempts\s+FROM PUBLIC, anon, authenticated/i);
+  assert.match(migration, /GRANT ALL ON TABLE public\.official_document_email_attempts TO service_role/i);
+});
+
 test('approval attaches and stores the PDF generated from the immutable issuance snapshot', async () => {
   const uploaded: Array<{ key: string; bytes: Uint8Array; contentType?: string }> = [];
   const emailPayloads: Record<string, unknown>[] = [];
@@ -690,6 +705,198 @@ test('approval records a failed delivery without exposing an automatic retry end
   assert.match(savedPdfText, /UEA-STU-2026-0001/);
   assert.doesNotMatch(savedPdfText, /FEE BREAKDOWN|Net Payable Amount|TERMS & CONDITIONS/);
   assert.doesNotMatch(savedPdfText, /Current Editable Course|Other Course/);
+});
+
+test('approved students can receive repeated current Official PDF resends with an audit result per attempt', async () => {
+  const logoKey = 'official-document-assets/eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee.png';
+  const savedSettings = {
+    ...DEFAULT_OFFICIAL_DOCUMENT_SETTINGS,
+    heading: 'CURRENT SAVED RESEND HEADING',
+    logoObjectKey: logoKey,
+    termsAndConditions: [{
+      id: 'resend-term-1',
+      title: 'Current Approved Term',
+      description: 'This currently saved clause must appear on each resent official PDF.',
+      displayOrder: 0,
+      isActive: true,
+    }],
+  };
+  const snapshot = {
+    application: {
+      id: applicationId,
+      application_reference: student.applicationNumber,
+      student_id: student.studentId,
+      student_name: student.fullName,
+      email: 'historical-email@example.com',
+      mobile: student.mobile,
+      qualification: student.qualification,
+      date_of_birth: student.dateOfBirth,
+      address: student.address,
+      photo_object_key: photoKey,
+      program_name: student.programName,
+    },
+    program: {
+      name: selectedCourse.name,
+      duration: selectedCourse.duration,
+      level: selectedCourse.level,
+    },
+    joining_information: {
+      joiningDate: '2026-02-01',
+      classSchedule: 'Monday to Saturday',
+      classTimings: '8:00 AM - 9:00 AM',
+      venue: 'Davanagere Ram & Co Circle',
+    },
+    document_settings: {
+      ...DEFAULT_OFFICIAL_DOCUMENT_SETTINGS,
+      heading: 'OLD SNAPSHOT HEADING',
+    },
+  };
+  const application = {
+    id: applicationId,
+    status: 'Accepted',
+    email: student.email,
+  };
+  const attempts = new Map<string, Record<string, unknown>>();
+  const auditWrites: Array<{ method: string; body: Record<string, unknown> }> = [];
+  const emailPayloads: Record<string, unknown>[] = [];
+  const assetReads: string[] = [];
+  const env = makeWorkerEnv({
+    APPLICATION_MEDIA: {
+      get: async (key: string) => {
+        assetReads.push(key);
+        if (key !== photoKey && key !== logoKey) return null;
+        return {
+          body: new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(pngBytes);
+              controller.close();
+            },
+          }),
+          httpMetadata: { contentType: 'image/png' },
+        };
+      },
+      put: async () => undefined,
+      delete: async () => undefined,
+      list: async () => ({ objects: [] }),
+    },
+  });
+  let emailAttempts = 0;
+  let applicationUpdates = 0;
+
+  const unauthorized = await handleApiRequest(
+    new Request(`https://academy.example/api/admin/applications/${applicationId}/resend-official-pdf`, {
+      method: 'POST',
+    }),
+    env,
+  );
+  assert.equal(unauthorized.status, 401);
+
+  await withAdminFetch('staff', async (request, url) => {
+    if (url.hostname === 'api.resend.com' && url.pathname === '/emails') {
+      emailAttempts += 1;
+      assert.equal(request.headers.get('Idempotency-Key'), null);
+      emailPayloads.push(await request.json() as Record<string, unknown>);
+      if (emailAttempts === 3) {
+        return Response.json({ message: 'Temporary provider failure.' }, { status: 503 });
+      }
+      return Response.json({ id: `resend-message-${emailAttempts}` });
+    }
+    if (url.pathname === '/rest/v1/applications') {
+      if (request.method === 'PATCH') {
+        applicationUpdates += 1;
+        return Response.json(application);
+      }
+      return Response.json([application]);
+    }
+    if (url.pathname === '/rest/v1/official_document_issuances') {
+      return Response.json([{ snapshot }]);
+    }
+    if (url.pathname === '/rest/v1/official_document_settings') {
+      return Response.json([{ document_data: savedSettings }]);
+    }
+    if (url.pathname === '/rest/v1/official_document_email_attempts') {
+      const body = await request.json() as Record<string, unknown>;
+      auditWrites.push({ method: request.method, body });
+      if (request.method === 'POST') {
+        attempts.set(String(body.id), { ...body, result: 'pending' });
+      } else {
+        const id = url.searchParams.get('id')?.replace(/^eq\./, '') || '';
+        attempts.set(id, { ...attempts.get(id), ...body });
+      }
+      return new Response(null, { status: 204 });
+    }
+    if (url.pathname === '/rest/v1/site_branding') {
+      return Response.json([{
+        academy_name: "Uptrend's English Academy",
+        logo_url: 'https://assets.example/branding/saved-logo.png',
+        primary_green: '#14532d',
+        primary_orange: '#ea580c',
+      }]);
+    }
+    if (url.pathname === '/rest/v1/email_template_settings') return Response.json([]);
+    throw new Error(`Unexpected request: ${url.hostname}${url.pathname}`);
+  }, async () => {
+    const resend = () => handleApiRequest(
+      authorizedRequest(`/api/admin/applications/${applicationId}/resend-official-pdf`, 'POST'),
+      env,
+    );
+    application.status = 'Pending';
+    const pendingApplicationResend = await resend();
+    assert.equal(pendingApplicationResend.status, 409);
+    application.status = 'Accepted';
+    const first = await resend();
+    assert.equal(first.status, 200);
+    const second = await resend();
+    assert.equal(second.status, 200);
+    const failed = await resend();
+    assert.equal(failed.status, 502);
+    assert.match((await failed.json() as { error: string }).error, /Email delivery was not confirmed/);
+    const afterFailure = await resend();
+    assert.equal(afterFailure.status, 200);
+  });
+
+  assert.equal(emailAttempts, 4);
+  assert.equal(emailPayloads.length, 4);
+  assert.equal(applicationUpdates, 0);
+  assert.equal(application.status, 'Accepted');
+  assert.equal(auditWrites.filter((write) => write.method === 'POST').length, 4);
+  assert.equal(auditWrites.filter((write) => write.method === 'PATCH').length, 4);
+  assert.deepEqual(
+    [...attempts.values()].map((attempt) => attempt.result),
+    ['success', 'success', 'failure', 'success'],
+  );
+  for (const audit of auditWrites.filter((write) => write.method === 'POST')) {
+    assert.equal(audit.body.application_id, applicationId);
+    assert.equal(audit.body.recipient_email, student.email);
+    assert.equal(audit.body.action_type, 'resend_official_pdf');
+    assert.equal(audit.body.attempted_by, userId);
+  }
+  assert.ok(assetReads.includes(photoKey));
+  assert.ok(assetReads.includes(logoKey));
+  for (const email of emailPayloads) {
+    assert.equal(email.to, student.email);
+    const attachments = email.attachments as Array<{ content: string }>;
+    assert.equal(attachments.length, 1);
+    const pdfText = decodePdfText(new Uint8Array(Buffer.from(attachments[0].content, 'base64')));
+    assert.match(pdfText, /CURRENT SAVED RESEND HEADING/);
+    assert.match(pdfText, /This currently saved clause must appear on each resent official PDF/);
+    assert.match(pdfText, /IELTS Preparation/);
+    assert.match(pdfText, /2026-02-01/);
+    assert.match(pdfText, /Davanagere Ram & Co Circle/);
+    assert.doesNotMatch(pdfText, /OLD SNAPSHOT HEADING|FEE BREAKDOWN|Net Payable Amount/);
+  }
+});
+
+test('local Express routing and the Admin Portal expose the protected resend action', async () => {
+  const [serverSource, workerSource, adminSource] = await Promise.all([
+    readFile(new URL('../server.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../worker-api.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../src/pages/AdminPortal.tsx', import.meta.url), 'utf8'),
+  ]);
+  assert.match(serverSource, /\/api\/admin\/applications\/:id\/resend-official-pdf/);
+  assert.match(workerSource, /resend-official-pdf\$/);
+  assert.match(adminSource, /selectedApp\.status === 'Accepted'[\s\S]{0,1200}Resend Official PDF/);
+  assert.match(adminSource, /resendingOfficialPdfIdsRef\.current\.has\(appId\)/);
 });
 
 test('authorized admins can list and download detached official-document history by application reference', async () => {
