@@ -235,7 +235,7 @@ export const Home: React.FC<HomeProps> = ({
 
               <h1 className="w-full max-w-none text-[clamp(3rem,8vw,3.75rem)] font-bold leading-[0.98] tracking-tight text-slate-950 max-[639px]:text-[clamp(2.25rem,10vw,2.75rem)] max-[639px]:text-center sm:text-[clamp(3.5rem,5.5vw,4.25rem)] min-[1100px]:!text-[clamp(3.375rem,4.75vw,4.25rem)]" style={{ fontFamily: 'Outfit, sans-serif' }}>
                 <span className="block">Speak English</span>
-                <span className="block min-[640px]:whitespace-nowrap">Fluently and <span className="text-orange-600">Confidently</span></span>
+                <span className="block min-[640px]:whitespace-nowrap"><span className="text-orange-600">Fluently</span> and <span className="text-emerald-600">Confidently</span></span>
                 <span className="block">in Davangere</span>
               </h1>
 
