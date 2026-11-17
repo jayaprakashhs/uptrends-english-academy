@@ -6,6 +6,7 @@ import {
   mergeOfficialDocumentSettings,
   type OfficialCourse,
   type OfficialDocumentSettings,
+  type OfficialTermAndCondition,
 } from './official-document';
 import {
   legacyUploadFilenameFromMetadata,
@@ -399,6 +400,34 @@ const requireAdmin = async (
 };
 
 const messageOf = (error: unknown): string => error instanceof Error ? error.message : 'Unexpected server error.';
+
+const safeSupabaseErrorField = (value: unknown): string | null => {
+  if (typeof value !== 'string' || !value) return null;
+  return value
+    .replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .replace(/Bearer\s+[^\s,;]+/gi, 'Bearer [REDACTED]')
+    .replace(/\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, '[REDACTED_TOKEN]')
+    .replace(/\b(?:sb_secret|sb_publishable)_[A-Za-z0-9_-]+\b/gi, '[REDACTED_KEY]')
+    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, '[REDACTED_EMAIL]')
+    .replace(/(?<![A-Za-z0-9])\+?\d[\d\s().-]{7,}\d(?![A-Za-z0-9])/g, '[REDACTED_PHONE]')
+    .slice(0, 1000);
+};
+
+const officialTermsRpcDiagnostic = (error: unknown) => {
+  const details = error && typeof error === 'object'
+    ? error as { code?: unknown; message?: unknown; details?: unknown; hint?: unknown }
+    : {};
+  const code = typeof details.code === 'string' && /^[A-Z0-9]{1,16}$/.test(details.code)
+    ? details.code
+    : null;
+  return {
+    operation: 'official_document.terms.save',
+    error_code: code,
+    error_message: safeSupabaseErrorField(details.message),
+    error_details: safeSupabaseErrorField(details.details),
+    error_hint: safeSupabaseErrorField(details.hint),
+  };
+};
 
 const parseJson = async (request: Request): Promise<Record<string, unknown> | Response> => {
   const contentLength = Number(request.headers.get('content-length') || 0);
@@ -1233,11 +1262,11 @@ const generatePdfFromSnapshot = async (
     }
     assets.studentPhoto = { bytes: photo.bytes, mime: photo.mime as 'image/jpeg' | 'image/png' };
   }
-  if (snapshot.historical_recovery?.is_historical_recovery === true) {
+  if (settings.layout.showLogo && snapshot.historical_recovery?.is_historical_recovery === true) {
     const logo = await loadCurrentBrandingLogo(env);
     if (isResponse(logo)) return logo;
     assets.logo = logo;
-  } else if (settings.logoObjectKey) {
+  } else if (settings.layout.showLogo && settings.logoObjectKey) {
     const logo = await readPrivateR2Object(env, settings.logoObjectKey, 'official-document-assets');
     if (isResponse(logo)) return logo;
     if (logo.mime === 'image/webp') {
@@ -1245,7 +1274,7 @@ const generatePdfFromSnapshot = async (
     }
     assets.logo = { bytes: logo.bytes, mime: logo.mime as 'image/jpeg' | 'image/png' };
   }
-  if (settings.graphicObjectKey) {
+  if (settings.layout.showDecorations && settings.graphicObjectKey) {
     const graphic = await readPrivateR2Object(env, settings.graphicObjectKey, 'official-document-assets');
     if (isResponse(graphic)) return graphic;
     if (graphic.mime === 'image/webp') return errorResponse('The configured PDF decorative graphic must be JPEG or PNG.', 422);
@@ -3200,6 +3229,9 @@ const validateOfficialDocumentSettings = (
   if (!settings || !isValidOfficialDocumentSettings(settings)) {
     return errorResponse('Document settings contain invalid fields.', 400);
   }
+  const validatedTerms = validateOfficialTerms(settings.termsAndConditions);
+  if (isResponse(validatedTerms)) return validatedTerms;
+  settings.termsAndConditions = validatedTerms;
   const textFields: Array<[string, string, number]> = [
     ['academyName', settings.academyName, 200],
     ['address', settings.address, 1000],
@@ -3244,6 +3276,97 @@ const validateOfficialDocumentSettings = (
     return errorResponse('Uploaded PDF asset references are invalid.', 400);
   }
   return settings;
+};
+
+const validateOfficialTerms = (value: unknown): OfficialTermAndCondition[] | Response => {
+  if (!Array.isArray(value)) return errorResponse('Terms and conditions must be provided as a list.', 400);
+  const terms: OfficialTermAndCondition[] = [];
+  const ids = new Set<string>();
+  const orders = new Set<number>();
+  for (const [index, rawTerm] of value.entries()) {
+    if (!rawTerm || typeof rawTerm !== 'object' || Array.isArray(rawTerm)) {
+      return errorResponse(`Term ${index + 1} must be an object.`, 400);
+    }
+    const term = rawTerm as Record<string, unknown>;
+    if (typeof term.id !== 'string' || !/^[A-Za-z0-9_-]{1,100}$/.test(term.id) || ids.has(term.id)) {
+      return errorResponse(`Term ${index + 1} must have a unique valid identifier.`, 400);
+    }
+    if (typeof term.title !== 'string' || typeof term.description !== 'string' ||
+      !term.description.trim() || !Number.isInteger(term.displayOrder) ||
+      (term.displayOrder as number) < 0 || typeof term.isActive !== 'boolean') {
+      return errorResponse(`Term ${index + 1} must have a valid title, non-empty description, display order, and active status.`, 400);
+    }
+    if (orders.has(term.displayOrder as number)) {
+      return errorResponse('Each term must have a unique display order.', 400);
+    }
+    const normalizeText = (text: string) => text
+      .replace(/\r\n?/g, '\n')
+      .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '');
+    const title = normalizeText(term.title);
+    const description = normalizeText(term.description);
+    if (!description.trim()) {
+      return errorResponse(`Term ${index + 1} description is empty after sanitization.`, 400);
+    }
+    terms.push({
+      id: term.id,
+      title,
+      description,
+      displayOrder: term.displayOrder as number,
+      isActive: term.isActive,
+    });
+    ids.add(term.id);
+    orders.add(term.displayOrder as number);
+  }
+  return terms;
+};
+
+const getOfficialDocumentTerms = async (
+  request: Request,
+  env: Env,
+): Promise<Response> => {
+  const auth = await requireAdmin(request, env, 'staff');
+  if (isResponse(auth)) return auth;
+  const { data, error } = await auth.supabase
+    .from('official_document_settings')
+    .select('document_data, updated_at')
+    .eq('setting_key', 'admission_approval')
+    .maybeSingle();
+  if (error) return errorResponse('Unable to load saved Terms & Conditions.', 503);
+  const settings = mergeOfficialDocumentSettings(data?.document_data ?? DEFAULT_OFFICIAL_DOCUMENT_SETTINGS);
+  if (!settings) return errorResponse('Saved official document settings are invalid.', 500);
+  return json({ termsAndConditions: settings.termsAndConditions, updated_at: data?.updated_at ?? null });
+};
+
+const saveOfficialDocumentTerms = async (
+  request: Request,
+  env: Env,
+): Promise<Response> => {
+  const auth = await requireAdmin(request, env, 'super_admin');
+  if (isResponse(auth)) return auth;
+  const body = await parseJson(request);
+  if (isResponse(body)) return body;
+  const terms = validateOfficialTerms(body.termsAndConditions);
+  if (isResponse(terms)) return terms;
+  const { data, error } = await auth.supabase.rpc('update_official_document_settings', {
+    p_settings: { termsAndConditions: terms },
+    p_updated_by: auth.profile.id,
+  });
+  if (error) {
+    console.error('Unable to persist official document terms.', {
+      ...officialTermsRpcDiagnostic(error),
+    });
+    return errorResponse('Unable to save Terms & Conditions. Your saved version has not been changed.', 503);
+  }
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    return errorResponse('Terms & Conditions were not returned after saving.', 503);
+  }
+  const result = data as { settings?: unknown; updated_at?: unknown };
+  const settings = mergeOfficialDocumentSettings(result.settings);
+  if (!settings) return errorResponse('Saved official document settings are invalid.', 500);
+  return json({
+    termsAndConditions: settings.termsAndConditions,
+    updated_at: typeof result.updated_at === 'string' ? result.updated_at : null,
+  });
 };
 
 const getEmailSettings = async (request: Request, env: Env): Promise<Response> => {
@@ -3487,7 +3610,9 @@ const getOfficialDocumentSettings = async (
   const settings = mergeOfficialDocumentSettings(data?.document_data ?? DEFAULT_OFFICIAL_DOCUMENT_SETTINGS);
   if (!settings) return errorResponse('Saved official document settings are invalid.', 500);
   return json({
-    settings,
+    settings: { ...settings, logoObjectKey: null, graphicObjectKey: null },
+    has_logo: Boolean(settings.logoObjectKey),
+    has_graphic: Boolean(settings.graphicObjectKey),
     updated_at: data?.updated_at ?? null,
     updated_by: data?.updated_by ?? null,
   });
@@ -3506,6 +3631,10 @@ const saveOfficialDocumentSettings = async (
   if (!body.settings || typeof body.settings !== 'object' || Array.isArray(body.settings)) {
     return errorResponse('Document settings must be a JSON object.', 400);
   }
+  if ((body.remove_logo !== undefined && typeof body.remove_logo !== 'boolean') ||
+    (body.remove_graphic !== undefined && typeof body.remove_graphic !== 'boolean')) {
+    return errorResponse('Official document asset removal flags must be boolean.', 400);
+  }
   const { data: currentData, error: currentError } = await auth.supabase
     .from('official_document_settings')
     .select('document_data')
@@ -3518,6 +3647,8 @@ const saveOfficialDocumentSettings = async (
   const candidate = {
     ...currentSettings,
     ...supplied,
+    logoObjectKey: body.remove_logo === true ? null : currentSettings.logoObjectKey,
+    graphicObjectKey: body.remove_graphic === true ? null : currentSettings.graphicObjectKey,
     sectionHeadings: {
       ...currentSettings.sectionHeadings,
       ...(supplied.sectionHeadings && typeof supplied.sectionHeadings === 'object' ? supplied.sectionHeadings : {}),
@@ -3570,19 +3701,11 @@ const saveOfficialDocumentSettings = async (
     return validated;
   }
 
-  const { data, error } = await auth.supabase
-    .from('official_document_settings')
-    .upsert(
-      {
-        setting_key: 'admission_approval',
-        document_data: validated,
-        updated_at: new Date().toISOString(),
-        updated_by: auth.profile.id,
-      },
-      { onConflict: 'setting_key' },
-    )
-    .select('document_data, updated_at, updated_by')
-    .single();
+  const settingsToPersist = { ...validated, termsAndConditions: undefined };
+  const { data, error } = await auth.supabase.rpc('update_official_document_settings', {
+    p_settings: settingsToPersist,
+    p_updated_by: auth.profile.id,
+  });
 
   if (error) {
     for (const asset of uploadedAssets) {
@@ -3596,10 +3719,18 @@ const saveOfficialDocumentSettings = async (
     );
   }
 
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    return errorResponse('Official document settings were not returned after saving.', 503);
+  }
+  const saved = data as { settings?: unknown; updated_at?: unknown };
+  const savedSettings = mergeOfficialDocumentSettings(saved.settings);
+  if (!savedSettings) return errorResponse('Saved official document settings are invalid.', 500);
   return json({
-    settings: data.document_data,
-    updated_at: data.updated_at,
-    updated_by: data.updated_by,
+    settings: { ...savedSettings, logoObjectKey: null, graphicObjectKey: null },
+    has_logo: Boolean(savedSettings.logoObjectKey),
+    has_graphic: Boolean(savedSettings.graphicObjectKey),
+    updated_at: typeof saved.updated_at === 'string' ? saved.updated_at : null,
+    updated_by: auth.profile.id,
   });
 };
 
@@ -3624,18 +3755,6 @@ const previewOfficialDocument = async (
   if (isResponse(auth)) return auth;
   const body = await parseJson(request);
   if (isResponse(body)) return body;
-  const applicationId = typeof body.application_id === 'string' ? body.application_id : '';
-  if (!validId(applicationId)) return errorResponse('Select an approved application to preview its admission document.', 400);
-  const { data: application, error: applicationError } = await auth.supabase
-    .from('applications')
-    .select('id,status,student_id')
-    .eq('id', applicationId)
-    .maybeSingle();
-  if (applicationError) return errorResponse('Unable to load the selected application for preview.', 503);
-  if (!application || application.status !== 'Accepted' || !application.student_id) {
-    return errorResponse('Preview is available only for an approved application with a Student ID.', 409);
-  }
-
   const { data: saved, error: settingsError } = await auth.supabase
     .from('official_document_settings')
     .select('document_data')
@@ -3670,20 +3789,76 @@ const previewOfficialDocument = async (
     });
   if (isResponse(settings)) return settings;
 
-  const { data: savedSnapshot, error: snapshotError } = await auth.supabase.rpc(
-    'build_official_document_snapshot',
-    { p_application_id: applicationId, p_joining_information: null },
-  );
-  if (snapshotError || !savedSnapshot || typeof savedSnapshot !== 'object' || Array.isArray(savedSnapshot)) {
-    return errorResponse('Unable to build a preview from the selected application.', 503);
+  const assets: Parameters<typeof generateOfficialPdf>[0]['assets'] = {};
+  if (settings.layout.showLogo) {
+    if (body.logo_file_base64 !== undefined) {
+      const logo = decodeImage(body.logo_file_base64, MAX_BRANDING_LOGO_HERO_IMAGE_BYTES);
+      if (isResponse(logo)) return logo;
+      if (logo.mime !== 'image/png' && logo.mime !== 'image/jpeg') {
+        return errorResponse('Official PDF logos must be JPEG or PNG images.', 400);
+      }
+      assets.logo = { bytes: logo.bytes, mime: logo.mime };
+    } else if (settings.logoObjectKey) {
+      const logo = await readPrivateR2Object(env, settings.logoObjectKey, 'official-document-assets');
+      if (isResponse(logo)) return logo;
+      if (logo.mime !== 'image/png' && logo.mime !== 'image/jpeg') {
+        return errorResponse('The configured PDF logo must be JPEG or PNG.', 422);
+      }
+      assets.logo = { bytes: logo.bytes, mime: logo.mime };
+    }
   }
-  const snapshot = {
-    ...(savedSnapshot as Record<string, unknown>),
-    document_settings: settings,
-    preview_only: true,
-  };
-  const bytes = await generatePdfFromSnapshot(env, snapshot);
-  if (isResponse(bytes)) return bytes;
+  if (settings.layout.showDecorations) {
+    if (body.graphic_file_base64 !== undefined) {
+      const graphic = decodeImage(body.graphic_file_base64, MAX_BRANDING_LOGO_HERO_IMAGE_BYTES);
+      if (isResponse(graphic)) return graphic;
+      if (graphic.mime !== 'image/png' && graphic.mime !== 'image/jpeg') {
+        return errorResponse('Official PDF graphics must be JPEG or PNG images.', 400);
+      }
+      assets.graphic = { bytes: graphic.bytes, mime: graphic.mime };
+    } else if (settings.graphicObjectKey) {
+      const graphic = await readPrivateR2Object(env, settings.graphicObjectKey, 'official-document-assets');
+      if (isResponse(graphic)) return graphic;
+      if (graphic.mime !== 'image/png' && graphic.mime !== 'image/jpeg') {
+        return errorResponse('The configured PDF decorative graphic must be JPEG or PNG.', 422);
+      }
+      assets.graphic = { bytes: graphic.bytes, mime: graphic.mime };
+    }
+  }
+  let bytes: Uint8Array;
+  try {
+    bytes = await generateOfficialPdf({
+      settings,
+      student: {
+        fullName: 'Preview Student',
+        studentId: 'PREVIEW-ONLY',
+        applicationNumber: 'PREVIEW-ONLY',
+        qualificationCategory: 'Graduate',
+        qualification: 'Synthetic preview data',
+        programName: 'Preview course',
+        email: 'preview@example.invalid',
+        mobile: '0000000000',
+        dateOfBirth: '2000-01-01',
+        address: 'Synthetic preview address',
+      },
+      course: {
+        name: 'Preview course',
+        duration: 'Preview data only',
+        mode: 'Preview only',
+        level: 'Sample',
+      },
+      joiningInformation: {
+        joiningDate: 'Preview only',
+        classSchedule: 'Preview only',
+        classTimings: 'Preview only',
+        venue: 'Preview only',
+      },
+      assets,
+      previewOnly: true,
+    });
+  } catch (error) {
+    console.error('Official PDF preview generation failed.', { error: messageOf(error) });
+    return errorResponse('The official PDF preview could not be generated.', 503);
+  }
   return responseWithPdf(bytes, 'Official_Document_PREVIEW.pdf', body.download === true ? 'attachment' : 'inline');
 };
 
@@ -4175,6 +4350,11 @@ export async function handleApiRequest(request: Request, env: Env): Promise<Resp
       if (method === 'DELETE') return deleteEmailHeaderPhoto(request, env);
       return methodNotAllowed(['POST', 'DELETE']);
     }
+    if (pathname === '/api/admin/official-document/terms') {
+      if (method === 'GET') return getOfficialDocumentTerms(request, env);
+      if (method === 'PUT') return saveOfficialDocumentTerms(request, env);
+      return methodNotAllowed(['GET', 'PUT']);
+    }
     if (pathname === '/api/admin/official-document' && method === 'GET') {
       return getOfficialDocumentSettings(request, env);
     }
@@ -4222,6 +4402,7 @@ export async function handleApiRequest(request: Request, env: Env): Promise<Resp
         '/api/admin/email-settings/reset': ['POST'],
         '/api/admin/email-settings/header-photo': ['POST', 'DELETE'],
         '/api/admin/official-document': ['GET', 'PUT'],
+        '/api/admin/official-document/terms': ['GET', 'PUT'],
         '/api/admin/programs': ['GET', 'POST'],
         '/api/admin/announcements': ['GET', 'POST'],
         '/api/admin/faqs': ['GET', 'POST'],

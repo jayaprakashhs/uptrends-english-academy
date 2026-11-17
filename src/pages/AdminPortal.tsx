@@ -5,6 +5,7 @@ import {
   DEFAULT_OFFICIAL_DOCUMENT_SETTINGS,
   type OfficialSection,
   type OfficialDocumentSettings,
+  type OfficialTermAndCondition,
 } from '../../official-document';
 import { supabase } from '../lib/supabase';
 
@@ -303,6 +304,15 @@ interface OfficialDocumentVersion {
 
 const [officialDocumentSettings, setOfficialDocumentSettings] =
   useState<OfficialDocumentSettings>({ ...DEFAULT_OFFICIAL_DOCUMENT_SETTINGS });
+const [savedOfficialDocumentSettings, setSavedOfficialDocumentSettings] =
+  useState<OfficialDocumentSettings>({ ...DEFAULT_OFFICIAL_DOCUMENT_SETTINGS });
+const [officialTerms, setOfficialTerms] = useState<OfficialTermAndCondition[]>([]);
+const [savedOfficialTerms, setSavedOfficialTerms] = useState<OfficialTermAndCondition[]>([]);
+const [officialTermsLoading, setOfficialTermsLoading] = useState(true);
+const [officialTermsLoadError, setOfficialTermsLoadError] = useState<string | null>(null);
+const [officialDocumentSettingsLoading, setOfficialDocumentSettingsLoading] = useState(true);
+const [officialDocumentSettingsLoadError, setOfficialDocumentSettingsLoadError] = useState<string | null>(null);
+const [officialTermsPreviewOpen, setOfficialTermsPreviewOpen] = useState(false);
 const [officialPdfPreviewUrl, setOfficialPdfPreviewUrl] = useState<string | null>(null);
 const [officialPdfApplicationId, setOfficialPdfApplicationId] = useState('');
 const [officialDocumentVersions, setOfficialDocumentVersions] = useState<OfficialDocumentVersion[]>([]);
@@ -310,6 +320,11 @@ const [pendingOfficialLogo, setPendingOfficialLogo] = useState<string | null>(nu
 const [pendingOfficialGraphic, setPendingOfficialGraphic] = useState<string | null>(null);
 const [officialLogoPreviewUrl, setOfficialLogoPreviewUrl] = useState<string | null>(null);
 const [officialGraphicPreviewUrl, setOfficialGraphicPreviewUrl] = useState<string | null>(null);
+const [officialLogoConfigured, setOfficialLogoConfigured] = useState(false);
+const [savedOfficialLogoConfigured, setSavedOfficialLogoConfigured] = useState(false);
+const [officialGraphicConfigured, setOfficialGraphicConfigured] = useState(false);
+const [savedOfficialGraphicConfigured, setSavedOfficialGraphicConfigured] = useState(false);
+const officialLogoFileInputRef = useRef<HTMLInputElement>(null);
 const mediaPreviewVideoId = mediaPreview?.media_type === 'video'
   ? extractYouTubeId(mediaPreview.youtube_url || mediaPreview.youtube_video_id)
   : null;
@@ -764,7 +779,107 @@ const loadOfficialDocumentVersions = async (applicationId: string) => {
   }
 };
 
+const normalizeOfficialTermsOrder = (terms: OfficialTermAndCondition[]) =>
+  [...terms]
+    .sort((left, right) => left.displayOrder - right.displayOrder)
+    .map((term, displayOrder) => ({ ...term, displayOrder }));
+
+const fetchOfficialDocumentTerms = async () => {
+  setOfficialTermsLoading(true);
+  try {
+    const result = await requestJson('/api/admin/official-document/terms', {
+      headers: getAuthHeaders(),
+    });
+    if (!Array.isArray(result.termsAndConditions)) {
+      throw new Error('Saved Terms & Conditions have an invalid format.');
+    }
+    const terms = normalizeOfficialTermsOrder(result.termsAndConditions as OfficialTermAndCondition[]);
+    setOfficialTerms(terms);
+    setSavedOfficialTerms(terms);
+    setOfficialTermsLoadError(null);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unable to load saved Terms & Conditions.';
+    setOfficialTermsLoadError(message);
+    setActionMessage({
+      type: 'error',
+      text: message,
+    });
+  } finally {
+    setOfficialTermsLoading(false);
+  }
+};
+
+const saveOfficialDocumentTerms = async () => {
+  if (officialTerms.some((term) => !term.description.trim())) {
+    setActionMessage({ type: 'error', text: 'Every term needs a description before it can be saved.' });
+    return;
+  }
+  setLoading(true);
+  try {
+    const terms = normalizeOfficialTermsOrder(officialTerms);
+    const result = await requestJson('/api/admin/official-document/terms', {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ termsAndConditions: terms }),
+    });
+    if (!Array.isArray(result.termsAndConditions)) {
+      throw new Error('Saved Terms & Conditions were not returned by the server.');
+    }
+    const savedTerms = normalizeOfficialTermsOrder(result.termsAndConditions as OfficialTermAndCondition[]);
+    setOfficialTerms(savedTerms);
+    setSavedOfficialTerms(savedTerms);
+    setOfficialDocumentSettings((current) => ({ ...current, termsAndConditions: savedTerms }));
+    setSavedOfficialDocumentSettings((current) => ({ ...current, termsAndConditions: savedTerms }));
+    setActionMessage({ type: 'success', text: 'Terms & Conditions saved successfully.' });
+  } catch (error) {
+    setActionMessage({
+      type: 'error',
+      text: error instanceof Error ? error.message : 'Unable to save Terms & Conditions.',
+    });
+  } finally {
+    setLoading(false);
+  }
+};
+
+const restoreSavedOfficialTerms = () => {
+  setOfficialTerms(savedOfficialTerms.map((term) => ({ ...term })));
+  setActionMessage({ type: 'success', text: 'Restored the previously saved Terms & Conditions.' });
+};
+
+const addOfficialTerm = () => {
+  setOfficialTerms((current) => normalizeOfficialTermsOrder([
+    ...current,
+    {
+      id: crypto.randomUUID(),
+      title: '',
+      description: '',
+      displayOrder: current.length,
+      isActive: true,
+    },
+  ]));
+  setActionMessage(null);
+};
+
+const moveOfficialTerm = (index: number, offset: -1 | 1) => {
+  setOfficialTerms((current) => {
+    const target = index + offset;
+    if (target < 0 || target >= current.length) return current;
+    const reordered = [...current];
+    [reordered[index], reordered[target]] = [reordered[target], reordered[index]];
+    return normalizeOfficialTermsOrder(reordered);
+  });
+  setActionMessage(null);
+};
+
+const deleteOfficialTerm = (index: number) => {
+  if (!window.confirm('Delete this unsaved Terms & Conditions item? Save Changes to apply this deletion.')) return;
+  setOfficialTerms((current) => normalizeOfficialTermsOrder(current.filter((_, itemIndex) => itemIndex !== index)));
+  setActionMessage(null);
+};
+
 const fetchOfficialDocumentSettings = async () => {
+  setOfficialDocumentSettingsLoading(true);
+  setOfficialDocumentSettingsLoadError(null);
   try {
     const result = await requestJson('/api/admin/official-document', {
       headers: getAuthHeaders(),
@@ -780,21 +895,56 @@ const fetchOfficialDocumentSettings = async () => {
       typography: { ...DEFAULT_OFFICIAL_DOCUMENT_SETTINGS.typography, ...result.settings?.typography },
       layout: { ...DEFAULT_OFFICIAL_DOCUMENT_SETTINGS.layout, ...result.settings?.layout },
     };
+    const hasLogo = typeof result.has_logo === 'boolean'
+      ? result.has_logo
+      : typeof settings.logoObjectKey === 'string' && settings.logoObjectKey.length > 0;
+    const hasGraphic = typeof result.has_graphic === 'boolean'
+      ? result.has_graphic
+      : typeof settings.graphicObjectKey === 'string' && settings.graphicObjectKey.length > 0;
+    settings.logoObjectKey = null;
+    settings.graphicObjectKey = null;
     setOfficialDocumentSettings(settings);
-    await Promise.all([
-      loadOfficialAssetPreview('logo', Boolean(settings.logoObjectKey)),
-      loadOfficialAssetPreview('graphic', Boolean(settings.graphicObjectKey)),
+    setSavedOfficialDocumentSettings(settings);
+    setOfficialLogoConfigured(hasLogo);
+    setSavedOfficialLogoConfigured(hasLogo);
+    setOfficialGraphicConfigured(hasGraphic);
+    setSavedOfficialGraphicConfigured(hasGraphic);
+    setPendingOfficialLogo(null);
+    setPendingOfficialGraphic(null);
+    const previewResults = await Promise.allSettled([
+      loadOfficialAssetPreview('logo', hasLogo),
+      loadOfficialAssetPreview('graphic', hasGraphic),
     ]);
+    if (previewResults.some((preview) => preview.status === 'rejected')) {
+      setActionMessage({
+        type: 'error',
+        text: 'Official document settings loaded, but a saved image preview could not be loaded.',
+      });
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unable to load official document settings.';
+    setOfficialDocumentSettingsLoadError(message);
     setActionMessage({ type: 'error', text: message });
+  } finally {
+    setOfficialDocumentSettingsLoading(false);
   }
 };
 
 const saveOfficialDocumentSettings = async (): Promise<OfficialDocumentSettings> => {
+  if (officialDocumentSettingsLoading || officialDocumentSettingsLoadError) {
+    throw new Error('Load the current official document settings before saving changes.');
+  }
   setLoading(true);
   try {
-    const payload: Record<string, unknown> = { settings: officialDocumentSettings };
+    const settingsToSave: Record<string, unknown> = { ...officialDocumentSettings };
+    delete settingsToSave.logoObjectKey;
+    delete settingsToSave.graphicObjectKey;
+    delete settingsToSave.termsAndConditions;
+    const payload: Record<string, unknown> = {
+      settings: settingsToSave,
+    };
+    if (savedOfficialLogoConfigured && !officialLogoConfigured) payload.remove_logo = true;
+    if (savedOfficialGraphicConfigured && !officialGraphicConfigured) payload.remove_graphic = true;
     if (pendingOfficialLogo) payload.logo_file_base64 = pendingOfficialLogo;
     if (pendingOfficialGraphic) payload.graphic_file_base64 = pendingOfficialGraphic;
     const result = await requestJson('/api/admin/official-document', {
@@ -813,13 +963,33 @@ const saveOfficialDocumentSettings = async (): Promise<OfficialDocumentSettings>
       typography: { ...DEFAULT_OFFICIAL_DOCUMENT_SETTINGS.typography, ...result.settings?.typography },
       layout: { ...DEFAULT_OFFICIAL_DOCUMENT_SETTINGS.layout, ...result.settings?.layout },
     };
+    const hasLogo = typeof result.has_logo === 'boolean'
+      ? result.has_logo
+      : typeof settings.logoObjectKey === 'string' && settings.logoObjectKey.length > 0;
+    const hasGraphic = typeof result.has_graphic === 'boolean'
+      ? result.has_graphic
+      : typeof settings.graphicObjectKey === 'string' && settings.graphicObjectKey.length > 0;
+    settings.logoObjectKey = null;
+    settings.graphicObjectKey = null;
     setOfficialDocumentSettings(settings);
+    setSavedOfficialDocumentSettings(settings);
+    setOfficialLogoConfigured(hasLogo);
+    setSavedOfficialLogoConfigured(hasLogo);
+    setOfficialGraphicConfigured(hasGraphic);
+    setSavedOfficialGraphicConfigured(hasGraphic);
     setPendingOfficialLogo(null);
     setPendingOfficialGraphic(null);
-    await Promise.all([
-      loadOfficialAssetPreview('logo', Boolean(settings.logoObjectKey)),
-      loadOfficialAssetPreview('graphic', Boolean(settings.graphicObjectKey)),
+    const previewResults = await Promise.allSettled([
+      loadOfficialAssetPreview('logo', hasLogo),
+      loadOfficialAssetPreview('graphic', hasGraphic),
     ]);
+    if (previewResults.some((preview) => preview.status === 'rejected')) {
+      setActionMessage({
+        type: 'error',
+        text: 'Official document settings were saved, but a saved image preview could not be loaded.',
+      });
+      return settings;
+    }
     setActionMessage({ type: 'success', text: 'Official PDF settings saved successfully.' });
     return settings;
   } catch (error) {
@@ -856,9 +1026,11 @@ const handleOfficialAssetChange = (
     if (type === 'logo') {
       setPendingOfficialLogo(reader.result);
       setOfficialLogoPreviewUrl(reader.result);
+      setOfficialLogoConfigured(true);
     } else {
       setPendingOfficialGraphic(reader.result);
       setOfficialGraphicPreviewUrl(reader.result);
+      setOfficialGraphicConfigured(true);
     }
     setActionMessage(null);
   };
@@ -866,20 +1038,26 @@ const handleOfficialAssetChange = (
 };
 
 const previewOfficialDocumentPdf = async (download = false) => {
-  const application = applications.find((item) =>
-    item.id === officialPdfApplicationId && item.status === 'Accepted' && Boolean(item.student_id),
-  );
-  if (!application) {
-    setActionMessage({ type: 'error', text: 'Select an approved application with a permanent Student ID before previewing.' });
-    return;
-  }
   try {
-    await saveOfficialDocumentSettings();
     setLoading(true);
+    const previewPayload: Record<string, unknown> = {
+      download,
+    };
+    if (isSuperAdmin) {
+      const { logoObjectKey: _logoObjectKey, graphicObjectKey: _graphicObjectKey, ...settings } = officialDocumentSettings;
+      previewPayload.settings = {
+        ...settings,
+        ...(!officialLogoConfigured ? { logoObjectKey: null } : {}),
+        ...(!officialGraphicConfigured ? { graphicObjectKey: null } : {}),
+        termsAndConditions: officialTerms,
+      };
+    }
+    if (pendingOfficialLogo) previewPayload.logo_file_base64 = pendingOfficialLogo;
+    if (pendingOfficialGraphic) previewPayload.graphic_file_base64 = pendingOfficialGraphic;
     const response = await fetchAdmin('/api/admin/official-document/preview', {
       method: 'POST',
       headers: getAuthHeaders(),
-      body: JSON.stringify({ application_id: application.id, download }),
+      body: JSON.stringify(previewPayload),
     });
     if (!response.ok) {
       const data = await response.json().catch(() => null);
@@ -894,7 +1072,7 @@ const previewOfficialDocumentPdf = async (download = false) => {
       link.click();
       link.remove();
       window.setTimeout(() => URL.revokeObjectURL(pdfUrl), 1000);
-      setActionMessage({ type: 'success', text: 'Preview-only PDF downloaded using the selected student application.' });
+      setActionMessage({ type: 'success', text: 'Synthetic preview-only PDF downloaded. No student record was used or changed.' });
     } else {
       setOfficialPdfPreviewUrl(pdfUrl);
       setActionMessage(null);
@@ -946,12 +1124,42 @@ const resetOfficialDocumentSettings = () => {
   setOfficialDocumentSettings({ ...DEFAULT_OFFICIAL_DOCUMENT_SETTINGS });
   setPendingOfficialLogo(null);
   setPendingOfficialGraphic(null);
+  setOfficialLogoConfigured(false);
+  setOfficialGraphicConfigured(false);
   setOfficialLogoPreviewUrl(null);
   setOfficialGraphicPreviewUrl(null);
   setActionMessage({ type: 'success', text: 'Defaults loaded. Save changes to persist them.' });
 };
 
+const cancelOfficialDocumentChanges = () => {
+  setOfficialDocumentSettings(savedOfficialDocumentSettings);
+  setPendingOfficialLogo(null);
+  setPendingOfficialGraphic(null);
+  setOfficialLogoConfigured(savedOfficialLogoConfigured);
+  setOfficialGraphicConfigured(savedOfficialGraphicConfigured);
+  void Promise.all([
+    loadOfficialAssetPreview('logo', savedOfficialLogoConfigured),
+    loadOfficialAssetPreview('graphic', savedOfficialGraphicConfigured),
+  ]).catch((error) => {
+    setActionMessage({
+      type: 'error',
+      text: error instanceof Error ? error.message : 'Unable to restore the saved PDF asset previews.',
+    });
+  });
+  setActionMessage({ type: 'success', text: 'Unsaved official PDF changes were cancelled.' });
+};
+
+const removeOfficialLogo = () => {
+  if (!window.confirm('Remove the saved academy logo from future official PDFs? This does not delete issued documents.')) return;
+  setPendingOfficialLogo(null);
+  setOfficialDocumentSettings((current) => ({ ...current, logoObjectKey: null }));
+  setOfficialLogoConfigured(false);
+  setOfficialLogoPreviewUrl(null);
+  setActionMessage({ type: 'success', text: 'Logo removal is staged. Save Changes to apply it to future PDFs.' });
+};
+
   useEffect(() => {
+    void fetchOfficialDocumentTerms();
     if (isSuperAdmin) void fetchOfficialDocumentSettings();
   }, [isSuperAdmin]);
 
@@ -1706,7 +1914,7 @@ const res = await fetchAdmin(url, {
     { id: 'notifications', label: 'Email History', icon: Send, minRole: 'super_admin' },
     { id: 'email-settings', label: 'Email Settings & Templates', icon: Send, minRole: 'staff' },
     { id: 'roles', label: 'Admin Roles & Access', icon: ShieldCheck, minRole: 'super_admin' },
-    { id: 'settings', label: 'Settings & PDF Config', icon: Settings, minRole: 'super_admin' },
+    { id: 'settings', label: 'Settings & PDF Config', icon: Settings, minRole: 'staff' },
   ];
 
   const allowedNavItems = navItems.filter((item) => {
@@ -4012,21 +4220,30 @@ const res = await fetchAdmin(url, {
               <header className="rounded-2xl border border-orange-100 bg-gradient-to-r from-[#fff8ef] via-white to-[#EAF3FF] p-5 shadow-sm">
                 <p className="text-[10px] font-bold uppercase tracking-[.16em] text-orange-700">Official documents</p>
                 <h1 className="mt-1 text-xl font-extrabold text-[#123B78] sm:text-2xl">Settings & Official PDF Configuration</h1>
-                <p className="mt-2 text-xs leading-relaxed text-slate-600">Configure the branded PDF template. Student-specific information is read directly from an approved application and cannot be edited here.</p>
+                <p className="mt-2 text-xs leading-relaxed text-slate-600">Manage approved Terms & Conditions for future admission PDFs. Only Super Admin can change settings; previews use synthetic student data only.</p>
               </header>
 
-              <section className="space-y-4 rounded-xl border border-blue-100 bg-white p-4 shadow-sm sm:p-5" aria-labelledby="official-student-preview-heading">
-                <div>
-                  <h2 id="official-student-preview-heading" className="font-bold text-[#0B1F4D]">Template preview</h2>
-                  <p className="mt-1 text-xs text-slate-500">Preview uses the actual data from the approved application selected below. It is marked preview-only and is never issued or emailed.</p>
+              {isSuperAdmin && officialDocumentSettingsLoadError && (
+                <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
+                  <span>{officialDocumentSettingsLoadError}</span>
+                  <button type="button" onClick={() => void fetchOfficialDocumentSettings()} className="min-h-9 rounded-lg border border-rose-300 px-3 text-xs font-bold">Retry PDF settings</button>
                 </div>
-                <div className="flex flex-wrap gap-2">
-                  <button type="button" disabled={loading || !applications.some((item) => item.id === officialPdfApplicationId && item.status === 'Accepted' && item.student_id)} onClick={() => void previewOfficialDocumentPdf()} className="min-h-11 rounded-xl bg-[#0B1F4D] px-4 py-2.5 text-xs font-bold text-white transition-colors hover:bg-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-500 disabled:cursor-not-allowed disabled:opacity-50">Preview PDF</button>
-                  <button type="button" disabled={loading || !applications.some((item) => item.id === officialPdfApplicationId && item.status === 'Accepted' && item.student_id)} onClick={() => void previewOfficialDocumentPdf(true)} className="min-h-11 rounded-xl border border-orange-300 bg-white px-4 py-2.5 text-xs font-bold text-orange-800 transition-colors hover:bg-orange-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-500 disabled:cursor-not-allowed disabled:opacity-50">Download Preview PDF</button>
-                </div>
-              </section>
+              )}
 
-              <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5" aria-labelledby="official-issued-document-heading">
+              {isAdminOrHigher && (
+                <section className="space-y-4 rounded-xl border border-blue-100 bg-white p-4 shadow-sm sm:p-5" aria-labelledby="official-student-preview-heading">
+                  <div>
+                    <h2 id="official-student-preview-heading" className="font-bold text-[#0B1F4D]">Template preview</h2>
+                    <p className="mt-1 text-xs text-slate-500">{isSuperAdmin ? 'Uses synthetic student data and your current unsaved PDF settings and terms.' : 'Uses synthetic student data and currently saved PDF settings and terms.'} Preview PDFs are never issued or emailed.</p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button type="button" disabled={loading || (isSuperAdmin && (officialDocumentSettingsLoading || Boolean(officialDocumentSettingsLoadError)))} onClick={() => void previewOfficialDocumentPdf()} className="min-h-11 rounded-xl bg-[#0B1F4D] px-4 py-2.5 text-xs font-bold text-white transition-colors hover:bg-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-500 disabled:cursor-not-allowed disabled:opacity-50">Preview PDF</button>
+                    <button type="button" disabled={loading || (isSuperAdmin && (officialDocumentSettingsLoading || Boolean(officialDocumentSettingsLoadError)))} onClick={() => void previewOfficialDocumentPdf(true)} className="min-h-11 rounded-xl border border-orange-300 bg-white px-4 py-2.5 text-xs font-bold text-orange-800 transition-colors hover:bg-orange-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-500 disabled:cursor-not-allowed disabled:opacity-50">Download Preview PDF</button>
+                  </div>
+                </section>
+              )}
+
+              {isAdminOrHigher && <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5" aria-labelledby="official-issued-document-heading">
                 <div>
                   <h2 id="official-issued-document-heading" className="font-bold text-[#0B1F4D]">Issued student document</h2>
                   <p className="mt-1 text-xs text-slate-500">Select an approved application to preview its real data, inspect document history, or download its issued PDF.</p>
@@ -4091,9 +4308,9 @@ const res = await fetchAdmin(url, {
                   </div>
                 )}
                 <button type="button" disabled={loading || !applications.some((item) => item.id === officialPdfApplicationId && item.status === 'Accepted' && item.student_id)} onClick={() => void downloadIssuedOfficialDocument()} className="min-h-11 rounded-xl border border-emerald-300 bg-white px-4 py-2.5 text-xs font-bold text-emerald-800 transition-colors hover:bg-emerald-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-600 disabled:cursor-not-allowed disabled:opacity-50">Download Latest Issued PDF</button>
-              </section>
+              </section>}
 
-              <form onSubmit={(event) => { event.preventDefault(); void saveOfficialDocumentSettings().catch(() => undefined); }} className="space-y-4">
+              {isSuperAdmin && <form onSubmit={(event) => { event.preventDefault(); void saveOfficialDocumentSettings().catch(() => undefined); }} className="space-y-4">
                 <section className="space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
                   <div>
                     <h2 className="font-bold text-[#0B1F4D]">Branding and typography</h2>
@@ -4101,18 +4318,34 @@ const res = await fetchAdmin(url, {
                   </div>
                   <div className="grid gap-4 md:grid-cols-2">
                     <div className="space-y-3 rounded-xl border border-slate-100 p-3">
-                      <label className="block text-xs font-semibold text-slate-700">Academy logo (PNG/JPEG, up to 3 MB)
-                        <input type="file" accept="image/png,image/jpeg" onChange={(event) => handleOfficialAssetChange('logo', event)} className="mt-2 block w-full text-xs" />
-                      </label>
-                      {officialLogoPreviewUrl && <img src={officialLogoPreviewUrl} alt="Official PDF academy logo preview" className="h-24 w-full rounded-lg border border-slate-200 bg-white p-2 object-contain" />}
-                      <button type="button" onClick={() => { setPendingOfficialLogo(null); setOfficialDocumentSettings((current) => ({ ...current, logoObjectKey: null })); setOfficialLogoPreviewUrl(null); }} className="text-xs font-semibold text-rose-700 underline">Remove logo</button>
+                      <div>
+                        <p className="text-xs font-semibold text-slate-700">Academy logo (PNG/JPEG, up to 3 MB)</p>
+                        <input
+                          ref={officialLogoFileInputRef}
+                          type="file"
+                          accept="image/png,image/jpeg"
+                          onChange={(event) => handleOfficialAssetChange('logo', event)}
+                          className="hidden"
+                        />
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          <button type="button" onClick={() => officialLogoFileInputRef.current?.click()} className="min-h-9 rounded-lg bg-[#123B78] px-3 text-xs font-bold text-white hover:bg-[#0B1F4D]">
+                            {pendingOfficialLogo || officialLogoConfigured ? 'Replace Logo' : 'Upload Logo'}
+                          </button>
+                          {(officialLogoConfigured || pendingOfficialLogo) && (
+                            <button type="button" onClick={removeOfficialLogo} className="min-h-9 rounded-lg border border-rose-200 px-3 text-xs font-bold text-rose-700 hover:bg-rose-50">Remove Logo</button>
+                          )}
+                        </div>
+                      </div>
+                      {officialLogoPreviewUrl
+                        ? <img src={officialLogoPreviewUrl} alt="Official PDF academy logo preview" className="h-24 w-full rounded-lg border border-slate-200 bg-white p-2 object-contain" />
+                        : <p className="rounded-lg border border-dashed border-slate-300 p-4 text-center text-xs text-slate-500">No academy logo is configured.</p>}
                     </div>
                     <div className="space-y-3 rounded-xl border border-slate-100 p-3">
                       <label className="block text-xs font-semibold text-slate-700">Footer building / decorative image (PNG/JPEG, up to 3 MB)
                         <input type="file" accept="image/png,image/jpeg" onChange={(event) => handleOfficialAssetChange('graphic', event)} className="mt-2 block w-full text-xs" />
                       </label>
                       {officialGraphicPreviewUrl && <img src={officialGraphicPreviewUrl} alt="Official PDF footer image preview" className="h-24 w-full rounded-lg border border-slate-200 bg-white p-2 object-contain" />}
-                      <button type="button" onClick={() => { setPendingOfficialGraphic(null); setOfficialDocumentSettings((current) => ({ ...current, graphicObjectKey: null })); setOfficialGraphicPreviewUrl(null); }} className="text-xs font-semibold text-rose-700 underline">Remove graphic</button>
+                      <button type="button" onClick={() => { setPendingOfficialGraphic(null); setOfficialDocumentSettings((current) => ({ ...current, graphicObjectKey: null })); setOfficialGraphicConfigured(false); setOfficialGraphicPreviewUrl(null); }} className="text-xs font-semibold text-rose-700 underline">Remove graphic</button>
                     </div>
                   </div>
                   <div className="rounded-xl border border-slate-200 bg-[#F4F7FC] p-3">
@@ -4201,24 +4434,171 @@ const res = await fetchAdmin(url, {
                   </div>
                   <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
                     {([
+                      ['showLogo', 'Show academy logo'],
                       ['showStudentPhoto', 'Show student photo'],
                       ['showDecorations', 'Show decorations'], ['showFooter', 'Show branded footer'],
                     ] as const).map(([key, label]) => (
                       <label key={key} className="flex min-h-10 items-center gap-2 rounded-lg border border-slate-100 px-3 text-xs font-semibold text-slate-700"><input type="checkbox" checked={officialDocumentSettings.layout[key]} onChange={(event) => setOfficialDocumentSettings((current) => ({ ...current, layout: { ...current.layout, [key]: event.target.checked } }))} />{label}</label>
                     ))}
                   </div>
-                  <p className="text-[11px] text-slate-500">The currently saved academy logo is always included when one is configured.</p>
+                  <p className="text-[11px] text-slate-500">The logo is included only when enabled and configured. Disabling or removing it affects future PDFs only; previously issued documents remain unchanged.</p>
                 </section>
 
                 <div className="sticky bottom-2 flex flex-wrap justify-end gap-2 rounded-2xl border border-slate-200 bg-white/95 p-3 shadow-lg backdrop-blur">
-                  <button type="button" disabled={loading} onClick={resetOfficialDocumentSettings} className="min-h-11 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50">Reset to Defaults</button>
-                  <button type="submit" disabled={loading} className="min-h-11 rounded-xl bg-orange-600 px-5 py-2.5 text-xs font-bold text-white hover:bg-orange-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600 disabled:opacity-50">{loading ? 'Saving...' : 'Save Changes'}</button>
+                  <button type="button" disabled={loading || officialDocumentSettingsLoading || Boolean(officialDocumentSettingsLoadError)} onClick={resetOfficialDocumentSettings} className="min-h-11 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50">Reset to Defaults</button>
+                  <button type="button" disabled={loading || officialDocumentSettingsLoading || Boolean(officialDocumentSettingsLoadError)} onClick={cancelOfficialDocumentChanges} className="min-h-11 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50">Cancel</button>
+                  <button type="submit" disabled={loading || officialDocumentSettingsLoading || Boolean(officialDocumentSettingsLoadError)} className="min-h-11 rounded-xl bg-orange-600 px-5 py-2.5 text-xs font-bold text-white hover:bg-orange-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600 disabled:opacity-50">{loading ? 'Saving...' : 'Save Changes'}</button>
                 </div>
-              </form>
+              </form>}
+
+              <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5" aria-labelledby="official-terms-heading">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h2 id="official-terms-heading" className="font-bold text-[#0B1F4D]">Terms & Conditions</h2>
+                    <p className="mt-1 text-xs text-slate-500">Only active items are included in newly generated admission PDFs, in the order shown.</p>
+                  </div>
+                  {isSuperAdmin && JSON.stringify(officialTerms) !== JSON.stringify(savedOfficialTerms) && (
+                    <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-bold text-amber-900">Unsaved draft</span>
+                  )}
+                </div>
+
+                {officialTermsLoading ? (
+                  <p role="status" className="rounded-xl bg-slate-50 p-4 text-sm text-slate-600">Loading saved Terms & Conditions...</p>
+                ) : officialTermsLoadError ? (
+                  <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
+                    <span>{officialTermsLoadError}</span>
+                    <button type="button" onClick={() => void fetchOfficialDocumentTerms()} className="min-h-9 rounded-lg border border-rose-300 px-3 text-xs font-bold">Retry Terms</button>
+                  </div>
+                ) : officialTerms.length === 0 ? (
+                  <p className="rounded-xl border border-dashed border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
+                    No approved Terms & Conditions are saved. Enter and save the academy-approved clauses before they can appear in the official admission PDF. No terms are invented or added by default.
+                  </p>
+                ) : (
+                  <div className="space-y-3">
+                    {officialTerms.map((term, index) => (
+                      <article key={term.id} className={`space-y-3 rounded-xl border p-3 sm:p-4 ${term.isActive ? 'border-slate-200 bg-white' : 'border-slate-200 bg-slate-50'}`}>
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <h3 className="text-xs font-bold text-slate-700">Condition {index + 1}</h3>
+                          {isSuperAdmin && (
+                            <div className="flex flex-wrap items-center gap-2">
+                              <button type="button" disabled={index === 0} onClick={() => moveOfficialTerm(index, -1)} className="min-h-9 rounded-lg border border-slate-300 px-3 text-xs font-semibold text-slate-700 disabled:opacity-40">Move Up</button>
+                              <button type="button" disabled={index === officialTerms.length - 1} onClick={() => moveOfficialTerm(index, 1)} className="min-h-9 rounded-lg border border-slate-300 px-3 text-xs font-semibold text-slate-700 disabled:opacity-40">Move Down</button>
+                              <button type="button" onClick={() => deleteOfficialTerm(index)} className="min-h-9 rounded-lg border border-rose-200 px-3 text-xs font-semibold text-rose-700 hover:bg-rose-50">Delete</button>
+                            </div>
+                          )}
+                        </div>
+                        <label className="block text-xs font-semibold text-slate-700">
+                          Condition heading <span className="font-normal text-slate-500">(optional)</span>
+                          <input
+                            value={term.title}
+                            readOnly={!isSuperAdmin}
+                            onChange={(event) => setOfficialTerms((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, title: event.target.value } : item))}
+                            className="mt-1 min-h-10 w-full rounded-lg border border-slate-200 px-3 read-only:bg-slate-50"
+                          />
+                        </label>
+                        <label className="block text-xs font-semibold text-slate-700">
+                          Description
+                          <textarea
+                            rows={5}
+                            value={term.description}
+                            readOnly={!isSuperAdmin}
+                            onChange={(event) => setOfficialTerms((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, description: event.target.value } : item))}
+                            className="mt-1 w-full resize-y rounded-lg border border-slate-200 px-3 py-2 leading-relaxed read-only:bg-slate-50"
+                          />
+                        </label>
+                        <label className="flex min-h-9 items-center gap-2 text-xs font-semibold text-slate-700">
+                          <input
+                            type="checkbox"
+                            checked={term.isActive}
+                            disabled={!isSuperAdmin}
+                            onChange={(event) => setOfficialTerms((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, isActive: event.target.checked } : item))}
+                          />
+                          Include this condition in future PDFs
+                        </label>
+                      </article>
+                    ))}
+                  </div>
+                )}
+
+                <div className="flex flex-wrap gap-2">
+                  {isSuperAdmin && (
+                    <>
+                      <button type="button" onClick={addOfficialTerm} disabled={officialTermsLoading || Boolean(officialTermsLoadError)} className="min-h-10 rounded-lg bg-[#123B78] px-4 text-xs font-bold text-white hover:bg-[#0B1F4D] disabled:opacity-50">Add Condition</button>
+                      <button type="button" onClick={restoreSavedOfficialTerms} disabled={loading || officialTermsLoading || Boolean(officialTermsLoadError) || JSON.stringify(officialTerms) === JSON.stringify(savedOfficialTerms)} className="min-h-10 rounded-lg border border-slate-300 px-4 text-xs font-bold text-slate-700 disabled:opacity-50">Cancel / Restore Saved Version</button>
+                      <button type="button" onClick={() => void saveOfficialDocumentTerms()} disabled={loading || officialTermsLoading || Boolean(officialTermsLoadError)} className="min-h-10 rounded-lg bg-orange-600 px-4 text-xs font-bold text-white hover:bg-orange-700 disabled:opacity-50">{loading ? 'Saving...' : 'Save Terms & Conditions'}</button>
+                    </>
+                  )}
+                  <button type="button" disabled={officialTermsLoading || Boolean(officialTermsLoadError) || (isSuperAdmin && (officialDocumentSettingsLoading || Boolean(officialDocumentSettingsLoadError)))} onClick={() => setOfficialTermsPreviewOpen(true)} className="min-h-10 rounded-lg border border-blue-200 bg-blue-50 px-4 text-xs font-bold text-[#123B78] hover:bg-blue-100 disabled:opacity-50">
+                    {isSuperAdmin && JSON.stringify(officialTerms) !== JSON.stringify(savedOfficialTerms) ? 'Preview Unsaved Terms' : 'Preview Terms & Conditions'}
+                  </button>
+                </div>
+              </section>
             </div>
           )}
         </main>
       </div>
+
+      {activeTab === 'settings' && officialTermsPreviewOpen && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-sm"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) setOfficialTermsPreviewOpen(false);
+          }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="official-terms-preview-title"
+            className="max-h-[calc(100dvh-2rem)] w-full max-w-3xl overflow-hidden rounded-2xl bg-white shadow-2xl"
+          >
+            <header className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-4">
+              <div>
+                <h2 id="official-terms-preview-title" className="font-bold text-[#123B78]">Terms & Conditions preview</h2>
+                <p className="mt-1 text-xs text-slate-500">
+                  {isSuperAdmin && JSON.stringify(officialTerms) !== JSON.stringify(savedOfficialTerms)
+                    ? 'Unsaved draft preview — not yet part of the saved admission document.'
+                    : 'Saved terms currently configured for future admission documents.'}
+                </p>
+              </div>
+              <button type="button" onClick={() => setOfficialTermsPreviewOpen(false)} className="min-h-10 rounded-lg border border-slate-300 px-3 text-xs font-bold text-slate-700">Close preview</button>
+            </header>
+            <div className="max-h-[calc(100dvh-10rem)] overflow-y-auto p-5 sm:p-8">
+              <article className="mx-auto max-w-2xl border-t-4 border-[#123B78] bg-white px-2 py-6 sm:px-6">
+                <p className="text-[10px] font-bold uppercase tracking-[.16em] text-orange-700">Uptrend's English Academy</p>
+                <h3 className="mt-2 border-b border-orange-200 pb-3 text-lg font-extrabold text-[#123B78]">TERMS & CONDITIONS</h3>
+                {officialTerms.filter((term) => term.isActive).length === 0 ? (
+                  <p className="mt-5 rounded-lg bg-amber-50 p-4 text-sm leading-relaxed text-amber-900">
+                    No active approved terms are configured. This section will not be added to new admission PDFs until approved terms are saved.
+                  </p>
+                ) : (
+                  <ol className="mt-5 space-y-5">
+                    {officialTerms.filter((term) => term.isActive).map((term, index) => (
+                      <li key={term.id} className="text-sm leading-7 text-slate-800">
+                        {term.title.trim() ? (
+                          <h4 className="font-bold text-[#123B78]">{index + 1}. {term.title}</h4>
+                        ) : (
+                          <h4 className="sr-only">Condition {index + 1}</h4>
+                        )}
+                        <p className="whitespace-pre-wrap">{term.title.trim() ? term.description : `${index + 1}. ${term.description}`}</p>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+              </article>
+              {officialTerms.some((term) => !term.isActive) && (
+                <p className="mx-auto mt-4 max-w-2xl rounded-lg bg-slate-100 p-3 text-xs text-slate-600">
+                  Inactive conditions are shown in the editor but are excluded from this PDF section.
+                </p>
+              )}
+              {isAdminOrHigher && (
+                <div className="mx-auto mt-4 max-w-2xl text-right">
+                  <button type="button" disabled={loading} onClick={() => { setOfficialTermsPreviewOpen(false); void previewOfficialDocumentPdf(); }} className="min-h-10 rounded-lg bg-[#123B78] px-4 text-xs font-bold text-white disabled:opacity-50">Preview Full PDF</button>
+                </div>
+              )}
+            </div>
+          </section>
+        </div>
+      )}
 
       {mediaPreview && (
         <div
@@ -4648,7 +5028,7 @@ const res = await fetchAdmin(url, {
                     onClick={() => void handleResendOfficialPdf(selectedApp.id)}
                     className="min-h-10 rounded-xl bg-[#123B78] px-4 py-2 text-xs font-bold text-white hover:bg-[#0B2D60] disabled:cursor-wait disabled:opacity-60"
                   >
-                    {resendingOfficialPdfId === selectedApp.id ? 'Sending Official PDF?' : 'Resend Official PDF'}
+                    {resendingOfficialPdfId === selectedApp.id ? 'Sending Official PDF…' : 'Resend Official PDF'}
                   </button>
                 )}
                 {selectedApp.status === 'Accepted' && (

@@ -9,6 +9,7 @@ import {
   generateOfficialPdf,
   type OfficialCourse,
   type OfficialStudent,
+  type OfficialTermAndCondition,
 } from '../official-document';
 import { handleApiRequest } from '../worker-api';
 
@@ -55,6 +56,13 @@ const decodePdfText = (bytes: Uint8Array): string =>
   [...decodePdfStreams(bytes).matchAll(/<([0-9a-f]+)> Tj/gi)]
     .map((text) => Buffer.from(text[1], 'hex').toString('latin1'))
     .join('\n');
+
+const decodePdfTextItems = (bytes: Uint8Array): Array<{ text: string; y: number }> =>
+  [...decodePdfStreams(bytes).matchAll(/1 0 0 1 [-\d.]+ ([-\d.]+) Tm\s*<([0-9a-f]+)> Tj/gi)]
+    .map((match) => ({
+      text: Buffer.from(match[2], 'hex').toString('latin1'),
+      y: Number(match[1]),
+    }));
 
 const makeWorkerEnv = (overrides: Record<string, unknown> = {}) => ({
   SUPABASE_URL: 'https://project.example',
@@ -178,13 +186,103 @@ test('official PDF uses branded header and footer and omits a missing-photo plac
   assert.match(text, /Uptrend's English Academy/);
   assert.match(text, /DAVANGERE - KARNATAKA/);
   assert.match(text, /https:\/\/uptrendsenglishacademy\.in/);
+  assert.match(text, /\+91 900 8000 211/);
+  assert.match(text, /uptrendsinstitute@gmail\.com/);
   assert.match(text, /Page 1 of 1/);
   assert.match(text, /UEA-APP-2026-0001/);
   assert.doesNotMatch(text, /\bPHOTO\b|Best Wishes!|document\s*version/i);
-  assert.match(source, /\/Subtype\s*\/Image/);
+  assert.doesNotMatch(source, /\/Subtype\s*\/Image/);
   assert.match(commands, /0\.07058823529411765 0\.23137254901960785 0\.47058823529411764 rg/);
   assert.match(commands, /1 0\.4196078431372549 0 rg/);
   assert.doesNotMatch(commands, /0 0\.6666666666666666 0 rg/);
+});
+
+test('official PDF embeds the configured logo only when logo display is enabled', async () => {
+  const bytes = await generateOfficialPdf({
+    settings: {
+      ...DEFAULT_OFFICIAL_DOCUMENT_SETTINGS,
+      layout: { ...DEFAULT_OFFICIAL_DOCUMENT_SETTINGS.layout, showLogo: true },
+    },
+    student,
+    course: selectedCourse,
+    assets: { logo: { bytes: pngBytes, mime: 'image/png' } },
+  });
+  assert.match(Buffer.from(bytes).toString('latin1'), /\/Subtype\s*\/Image/);
+});
+
+test('official PDF prints only active terms in saved order and preserves paragraph breaks', async () => {
+  const bytes = await generateOfficialPdf({
+    settings: {
+      ...DEFAULT_OFFICIAL_DOCUMENT_SETTINGS,
+      termsAndConditions: [
+        {
+          id: 'later',
+          title: 'Second approved clause',
+          description: 'First paragraph.\nSecond line.\n\nNew paragraph.',
+          displayOrder: 1,
+          isActive: true,
+        },
+        {
+          id: 'earlier',
+          title: 'First approved clause',
+          description: 'The first item in display order.',
+          displayOrder: 0,
+          isActive: true,
+        },
+        {
+          id: 'inactive',
+          title: 'Disabled clause',
+          description: 'This clause must not appear.',
+          displayOrder: 2,
+          isActive: false,
+        },
+      ],
+    },
+    student,
+    course: selectedCourse,
+  });
+  const text = decodePdfText(bytes);
+  assert.match(text, /TERMS & CONDITIONS/);
+  assert.ok(text.indexOf('First approved clause') < text.indexOf('Second approved clause'));
+  assert.match(text, /First paragraph/);
+  assert.match(text, /Second line/);
+  assert.match(text, /New paragraph/);
+  assert.doesNotMatch(text, /Disabled clause|This clause must not appear/);
+});
+
+test('long official terms continue across pages without reaching the footer', async () => {
+  const finalMarker = 'FINAL-APPROVED-TERM-SENTINEL';
+  const longDescription = Array.from(
+    { length: 700 },
+    (_, index) => `Approved clause sentence ${index + 1} preserves its complete wording.`,
+  ).join('\n') + `\n${finalMarker}`;
+  const bytes = await generateOfficialPdf({
+    settings: {
+      ...DEFAULT_OFFICIAL_DOCUMENT_SETTINGS,
+      termsAndConditions: [{
+        id: 'long-term',
+        title: 'Long approved condition',
+        description: longDescription,
+        displayOrder: 0,
+        isActive: true,
+      }],
+    },
+    student,
+    course: selectedCourse,
+  });
+  const pdf = await PDFDocument.load(bytes);
+  const text = decodePdfText(bytes);
+  const items = decodePdfTextItems(bytes);
+  const marker = items.find((item) => item.text.includes(finalMarker));
+  assert.ok(pdf.getPageCount() > 1);
+  assert.match(text, /Approved clause sentence 1/);
+  assert.match(text, /Approved clause sentence 700/);
+  assert.match(text, new RegExp(finalMarker));
+  assert.ok(marker, 'Expected to locate the final terms text on a PDF page.');
+  assert.ok(marker.y > 80, 'Final terms text must remain above the footer area.');
+  for (let pageNumber = 1; pageNumber <= pdf.getPageCount(); pageNumber += 1) {
+    assert.match(text, new RegExp(`Page ${pageNumber} of ${pdf.getPageCount()}`));
+  }
 });
 
 test('graduate and working PDFs use applicant contacts and never parent contacts', async () => {
@@ -222,7 +320,11 @@ test('missing photo and long joining details produce a readable multipage PDF', 
   });
   const pdf = await PDFDocument.load(bytes);
   const text = decodePdfText(bytes);
-  assert.ok(pdf.getPageCount() > 1);
+  const pageCount = pdf.getPageCount();
+  assert.ok(pageCount > 1);
+  for (let pageNumber = 1; pageNumber <= pageCount; pageNumber += 1) {
+    assert.match(text, new RegExp(`Page ${pageNumber} of ${pageCount}`));
+  }
   assert.match(text, /End/);
   assert.match(text, /Last instruction/);
 });
@@ -253,68 +355,29 @@ test('legacy fee and payment settings are excluded from admission document setti
   assert.equal('payment' in legacySettings.sectionHeadings, false);
 });
 
-test('admission document preview uses the selected approved application data', async () => {
-  const photoReads: string[] = [];
-  const application = {
-    id: applicationId,
-    application_reference: student.applicationNumber,
-    student_id: student.studentId,
-    student_name: student.fullName,
-    email: student.email,
-    mobile: student.mobile,
-    qualification: student.qualification,
-    program_id: programId,
-    program_name: student.programName,
-    date_of_birth: student.dateOfBirth,
-    address: student.address,
-    photo_object_key: photoKey,
-    approved_at: '2026-01-01T10:00:00Z',
-    status: 'Accepted',
-  };
+test('official PDF preview uses synthetic data without reading student records or persisting changes', async () => {
+  let r2Reads = 0;
+  let unexpectedStudentQuery = false;
   const env = makeWorkerEnv({
     APPLICATION_MEDIA: {
-      get: async (key: string) => {
-        photoReads.push(key);
-        if (key !== photoKey) return null;
-        return {
-          body: new ReadableStream<Uint8Array>({
-            start(controller) {
-              controller.enqueue(pngBytes);
-              controller.close();
-            },
-          }),
-          httpMetadata: { contentType: 'image/png' },
-        };
-      },
+      get: async () => { r2Reads += 1; return null; },
       list: async () => ({ objects: [] }),
     },
   });
-
-  const applicationSnapshot = {
-    application: {
-      ...application,
-      qualification_category: 'Graduate',
-      parent_phone: null,
-      parent_email: null,
-    },
-    program: { name: selectedCourse.name, duration: selectedCourse.duration, mode: 'Regular classroom' },
-    payment_summary: { total_payable: 13000, total_paid: 500, payments: [] },
-    document_settings: {},
-    joining_information: {},
-  };
   await withAdminFetch('admin', async (request, url) => {
     if (url.pathname.endsWith('/official_document_settings')) return Response.json([]);
-    if (url.pathname.endsWith('/applications')) {
-      return Response.json([{ id: applicationId, status: 'Accepted', student_id: student.studentId }]);
-    }
-    if (url.pathname.endsWith('/rpc/build_official_document_snapshot')) {
-      assert.equal(request.method, 'POST');
-      return Response.json(applicationSnapshot);
-    }
+    if (url.pathname.endsWith('/applications') || url.pathname.includes('/rpc/')) unexpectedStudentQuery = true;
     throw new Error(`Unexpected Supabase request: ${url.pathname}`);
   }, async () => {
+    const previewSettings = {
+      ...DEFAULT_OFFICIAL_DOCUMENT_SETTINGS,
+      layout: { ...DEFAULT_OFFICIAL_DOCUMENT_SETTINGS.layout, showLogo: false },
+    };
     const response = await handleApiRequest(
-      authorizedRequest('/api/admin/official-document/preview', 'POST', { application_id: applicationId }),
+      authorizedRequest('/api/admin/official-document/preview', 'POST', {
+        settings: previewSettings,
+        logo_file_base64: `data:image/png;base64,${Buffer.from(pngBytes).toString('base64')}`,
+      }),
       env,
     );
     assert.equal(response.status, 200);
@@ -325,12 +388,58 @@ test('admission document preview uses the selected approved application data', a
     assert.equal((await PDFDocument.load(bytes)).getPageCount(), 1);
     const text = decodePdfText(bytes);
     assert.match(text, /PREVIEW ONLY - NOT AN OFFICIAL STUDENT DOCUMENT/);
-    assert.match(text, /Test Learner/);
-    assert.match(text, /IELTS Preparation/);
-    assert.match(text, /UEA-STU-2026-0001/);
-    assert.doesNotMatch(text, /PREVIEW APPLICANT|FEE BREAKDOWN|Net Payable Amount|PAYMENT PENDING|INR 500/);
+    assert.match(text, /Preview Student/);
+    assert.match(text, /PREVIEW-ONLY/);
+    assert.match(text, /Synthetic preview data/);
+    assert.match(text, /Preview course/);
+    assert.doesNotMatch(text, /Test Learner|UEA-STU-2026-0001|FEE BREAKDOWN|Net Payable Amount|PAYMENT PENDING/);
   });
-  assert.deepEqual(photoReads, [photoKey]);
+  assert.equal(unexpectedStudentQuery, false);
+  assert.equal(r2Reads, 0);
+});
+
+test('official PDF preview loads the latest saved terms and settings without querying student data', async () => {
+  const savedSettings = {
+    ...DEFAULT_OFFICIAL_DOCUMENT_SETTINGS,
+    subtitle: 'Latest saved preview subtitle',
+    logoObjectKey: null,
+    termsAndConditions: [{
+      id: 'saved-clause',
+      title: 'Latest saved clause',
+      description: 'Latest saved clause text.',
+      displayOrder: 0,
+      isActive: true,
+    }],
+  };
+  await withAdminFetch('admin', async (_request, url) => {
+    if (url.pathname.endsWith('/official_document_settings')) {
+      return Response.json([{ document_data: savedSettings }]);
+    }
+    throw new Error(`Preview must not query student records: ${url.pathname}`);
+  }, async () => {
+    const response = await handleApiRequest(
+      authorizedRequest('/api/admin/official-document/preview', 'POST', {}),
+      makeWorkerEnv(),
+    );
+    assert.equal(response.status, 200);
+    const text = decodePdfText(new Uint8Array(await response.arrayBuffer()));
+    assert.match(text, /Preview Student/);
+    assert.match(text, /Latest saved preview subtitle/);
+    assert.match(text, /Latest saved clause text/);
+    assert.doesNotMatch(text, /Test Learner|UEA-STU-2026-0001/);
+  });
+});
+
+test('official document terms migration restricts atomic JSON updates to the Worker service role', async () => {
+  const migration = await readFile(
+    new URL('../supabase/migrations/20261106000001_official_document_terms_management.sql', import.meta.url),
+    'utf8',
+  );
+  assert.match(migration, /CREATE OR REPLACE FUNCTION public\.update_official_document_settings/i);
+  assert.match(migration, /jsonb_set\([\s\S]*'\{termsAndConditions\}'/i);
+  assert.match(migration, /REVOKE ALL ON FUNCTION public\.update_official_document_settings\(jsonb, uuid\)\s+FROM PUBLIC, anon, authenticated/i);
+  assert.match(migration, /GRANT EXECUTE ON FUNCTION public\.update_official_document_settings\(jsonb, uuid\)\s+TO service_role/i);
+  assert.doesNotMatch(migration, /GRANT EXECUTE[\s\S]*TO authenticated/i);
 });
 
 test('official document setting-key migration allows only the intended existing keys', async () => {
@@ -374,6 +483,7 @@ test('approval attaches and stores the PDF generated from the immutable issuance
   const uploaded: Array<{ key: string; bytes: Uint8Array; contentType?: string }> = [];
   const emailPayloads: Record<string, unknown>[] = [];
   const notificationWrites: Record<string, unknown>[] = [];
+  const attemptWrites: Array<{ method: string; body: Record<string, unknown> }> = [];
   const snapshot = {
     application: {
       id: applicationId,
@@ -395,7 +505,18 @@ test('approval attaches and stores the PDF generated from the immutable issuance
       duration: selectedCourse.duration,
       level: selectedCourse.level,
     },
-    document_settings: DEFAULT_OFFICIAL_DOCUMENT_SETTINGS,
+    document_settings: {
+      ...DEFAULT_OFFICIAL_DOCUMENT_SETTINGS,
+      termsAndConditions: [
+        {
+          id: 'approval-term-1',
+          title: 'Approved clause',
+          description: 'This clause came from the latest official settings snapshot.',
+          displayOrder: 0,
+          isActive: true,
+        },
+      ],
+    },
     joining_information: {
       joiningDate: '2026-02-01',
       classSchedule: 'Monday to Saturday',
@@ -475,6 +596,13 @@ test('approval attaches and stores the PDF generated from the immutable issuance
       notificationWrites.push(await request.json() as Record<string, unknown>);
       return new Response(null, { status: 204 });
     }
+    if (url.pathname.endsWith('/official_document_email_attempts')) {
+      attemptWrites.push({
+        method: request.method,
+        body: await request.json() as Record<string, unknown>,
+      });
+      return new Response(null, { status: 204 });
+    }
     if (url.pathname.endsWith('/official_document_issuances')) {
       assert.equal(request.method, 'PATCH');
       return new Response(null, { status: 204 });
@@ -501,6 +629,10 @@ test('approval attaches and stores the PDF generated from the immutable issuance
   assert.equal(new TextDecoder().decode(uploaded[0].bytes.slice(0, 5)), '%PDF-');
   assert.equal(notificationWrites.length, 1);
   assert.equal(notificationWrites[0].status, 'Sent');
+  assert.equal(attemptWrites.length, 2);
+  assert.equal(attemptWrites[0].body.action_type, 'approval');
+  assert.equal(attemptWrites[0].body.recipient_email, student.email);
+  assert.equal(attemptWrites[1].body.result, 'success');
   const emailPayload = emailPayloads[0];
   assert.ok(emailPayload);
   const attachments = emailPayload.attachments as Array<{ filename: string; content: string }>;
@@ -515,6 +647,8 @@ test('approval attaches and stores the PDF generated from the immutable issuance
   assert.match(attachedText, /Monday to Saturday/);
   assert.match(attachedText, /8:00 AM/);
   assert.match(attachedText, /Davanagere/);
+  assert.match(attachedText, /TERMS & CONDITIONS/);
+  assert.match(attachedText, /This clause came from the latest official settings snapshot/);
   assert.doesNotMatch(attachedText, /PAYMENT PENDING|Total Paid|Outstanding Balance|Payment Mode|INR 0\.00/);
   assert.doesNotMatch(attachedText, /Other Course|Spoken English|Business English/);
 });
@@ -529,6 +663,7 @@ test('approval records a failed delivery without exposing an automatic retry end
   let emailAttempts = 0;
   let approvalCalls = 0;
   const resendPayloads: Record<string, unknown>[] = [];
+  const attemptWrites: Array<{ method: string; body: Record<string, unknown> }> = [];
   const snapshot = {
     application: {
       id: applicationId,
@@ -645,6 +780,13 @@ test('approval records a failed delivery without exposing an automatic retry end
       if (request.method === 'POST') notificationCount += 1;
       return Response.json([{ id: 'ffffffff-ffff-4fff-8fff-ffffffffffff', status: deliveryStatus }]);
     }
+    if (url.pathname.endsWith('/official_document_email_attempts')) {
+      attemptWrites.push({
+        method: request.method,
+        body: await request.json() as Record<string, unknown>,
+      });
+      return new Response(null, { status: 204 });
+    }
     if (url.pathname === '/rest/v1/applications' && request.method === 'PATCH') {
       return Response.json({
         id: applicationId,
@@ -696,6 +838,10 @@ test('approval records a failed delivery without exposing an automatic retry end
   assert.match(approvalAttachments[0].filename, /^Official_Document_/);
   assert.ok(approvalAttachments[0].content.length > 0);
   assert.equal(notificationCount, 1);
+  assert.equal(attemptWrites.length, 2);
+  assert.equal(attemptWrites[0].body.action_type, 'approval');
+  assert.equal(attemptWrites[1].body.result, 'failure');
+  assert.equal(attemptWrites[1].body.failure_code, 'email_delivery_failed');
   assert.deepEqual(uploadedPdfs, [`official-documents/${applicationId}/v1-${issuance.id}.pdf`]);
   assert.ok(assetReads.includes(logoKey));
   assert.equal(deliveryStatus, 'Failed');
@@ -1033,32 +1179,382 @@ test('official PDF settings require super-admin and store uploaded assets privat
   });
 
   await withAdminFetch('super_admin', async (request, url) => {
-    if (!url.pathname.endsWith('/official_document_settings')) {
+    if (url.pathname.endsWith('/official_document_settings') && request.method === 'GET') {
+      return Response.json([]);
+    }
+    if (!url.pathname.endsWith('/rpc/update_official_document_settings')) {
       throw new Error(`Unexpected Supabase request: ${url.pathname}`);
     }
-    if (request.method === 'GET') return Response.json([]);
-    const body = await request.json() as { setting_key: string; document_data: Record<string, unknown> } | Array<{ setting_key: string; document_data: Record<string, unknown> }>;
-    const row = Array.isArray(body) ? body[0] : body;
-    savedSettingKeys.push(row.setting_key);
-    savedSettings.push(row.document_data);
-    return Response.json(row);
+    const body = await request.json() as { p_settings: Record<string, unknown> };
+    savedSettingKeys.push('admission_approval');
+    savedSettings.push(body.p_settings);
+    return Response.json({
+      settings: body.p_settings,
+      updated_at: '2026-11-06T00:00:00Z',
+    });
   }, async () => {
     const response = await handleApiRequest(
       authorizedRequest('/api/admin/official-document', 'PUT', requestBody),
       env,
     );
     assert.equal(response.status, 200);
-    const body = await response.json() as { settings: Record<string, unknown> };
+    const body = await response.json() as { settings: Record<string, unknown>; has_logo: boolean };
     assert.equal(body.settings.heading, 'Updated Admission Confirmation');
     assert.deepEqual(body.settings.joiningInstructions, ['Bring the admission confirmation slip.']);
     assert.equal('terms' in body.settings, false);
-    assert.match(String(body.settings.logoObjectKey), /^official-document-assets\/[0-9a-f-]+\.png$/i);
+    assert.equal(body.settings.logoObjectKey, null);
+    assert.equal(body.has_logo, true);
+    assert.doesNotMatch(JSON.stringify(body), /official-document-assets\/[0-9a-f-]+\.png/i);
   });
   assert.equal(savedSettings[0]?.heading, 'Updated Admission Confirmation');
   assert.deepEqual(savedSettings[0]?.joiningInstructions, ['Bring the admission confirmation slip.']);
   assert.deepEqual(savedSettingKeys, ['admission_approval']);
   assert.equal(uploadedKeys.length, 1);
   assert.match(uploadedKeys[0], /^official-document-assets\/[0-9a-f-]+\.png$/i);
+});
+
+test('official document terms support super-admin edits and persistence while staff roles are read-only', async () => {
+  const savedDocumentData: Record<string, unknown> = {
+    ...DEFAULT_OFFICIAL_DOCUMENT_SETTINGS,
+    logoObjectKey: 'official-document-assets/eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee.png',
+    graphicObjectKey: 'official-document-assets/ffffffff-ffff-4fff-8fff-ffffffffffff.png',
+    colors: { ...DEFAULT_OFFICIAL_DOCUMENT_SETTINGS.colors, navy: '#234567' },
+    layout: { ...DEFAULT_OFFICIAL_DOCUMENT_SETTINGS.layout, showDecorations: true },
+  };
+  let settingsRpcCalls = 0;
+  const rpcPayloads: Array<Record<string, unknown>> = [];
+  const env = makeWorkerEnv();
+  const handleSettingsRequest = async (request: Request, url: URL) => {
+    if (url.pathname.endsWith('/official_document_settings')) {
+      return Response.json([{ document_data: savedDocumentData, updated_at: '2026-11-06T00:00:00Z' }]);
+    }
+    if (url.pathname.endsWith('/rpc/update_official_document_settings')) {
+      settingsRpcCalls += 1;
+      const body = await request.json() as Record<string, unknown>;
+      rpcPayloads.push(body);
+      assert.equal(request.method, 'POST');
+      assert.deepEqual(Object.keys(body).sort(), ['p_settings', 'p_updated_by']);
+      assert.equal(body.p_updated_by, userId);
+      const settings = body.p_settings as Record<string, unknown>;
+      assert.deepEqual(Object.keys(settings), ['termsAndConditions']);
+      assert.ok(Array.isArray(settings.termsAndConditions));
+      Object.assign(savedDocumentData, settings);
+      return Response.json({
+        settings: savedDocumentData,
+        updated_at: '2026-11-06T00:01:00Z',
+      });
+    }
+    throw new Error(`Unexpected Supabase request: ${url.pathname}`);
+  };
+  const initialTerms: OfficialTermAndCondition[] = [
+    { id: 'clause-one', title: 'Initial title', description: 'Initial approved wording.', displayOrder: 0, isActive: true },
+    { id: 'clause-two', title: '', description: 'Second approved wording.', displayOrder: 1, isActive: false },
+  ];
+
+  for (const role of ['staff', 'admin'] as const) {
+    await withAdminFetch(role, handleSettingsRequest, async () => {
+      const readResponse = await handleApiRequest(
+        authorizedRequest('/api/admin/official-document/terms'),
+        env,
+      );
+      assert.equal(readResponse.status, 200);
+      assert.deepEqual((await readResponse.json() as { termsAndConditions: unknown }).termsAndConditions, []);
+
+      const deniedResponse = await handleApiRequest(
+        authorizedRequest('/api/admin/official-document/terms', 'PUT', {
+          termsAndConditions: initialTerms,
+        }),
+        env,
+      );
+      assert.equal(deniedResponse.status, 403);
+    });
+  }
+
+  await withAdminFetch('super_admin', handleSettingsRequest, async () => {
+    const settingsResponse = await handleApiRequest(
+      authorizedRequest('/api/admin/official-document'),
+      env,
+    );
+    assert.equal(settingsResponse.status, 200);
+    const publicSettings = await settingsResponse.json() as {
+      settings: Record<string, unknown>;
+      has_logo: boolean;
+    };
+    assert.equal(publicSettings.settings.logoObjectKey, null);
+    assert.equal(publicSettings.has_logo, true);
+    assert.doesNotMatch(JSON.stringify(publicSettings), /official-document-assets\/[0-9a-f-]+\.png/i);
+
+    const addResponse = await handleApiRequest(
+      authorizedRequest('/api/admin/official-document/terms', 'PUT', {
+        termsAndConditions: initialTerms,
+      }),
+      env,
+    );
+    assert.equal(addResponse.status, 200);
+    assert.deepEqual((await addResponse.json() as { termsAndConditions: unknown }).termsAndConditions, initialTerms);
+
+    const editedAndReorderedTerms: OfficialTermAndCondition[] = [
+      { ...initialTerms[1], displayOrder: 0, isActive: true, description: 'Edited and activated wording.' },
+      { ...initialTerms[0], displayOrder: 1, title: 'Edited title' },
+    ];
+    const editResponse = await handleApiRequest(
+      authorizedRequest('/api/admin/official-document/terms', 'PUT', {
+        termsAndConditions: editedAndReorderedTerms,
+      }),
+      env,
+    );
+    assert.equal(editResponse.status, 200);
+    assert.deepEqual((await editResponse.json() as { termsAndConditions: unknown }).termsAndConditions, editedAndReorderedTerms);
+
+    const reloadedResponse = await handleApiRequest(
+      authorizedRequest('/api/admin/official-document/terms'),
+      env,
+    );
+    assert.equal(reloadedResponse.status, 200);
+    assert.deepEqual((await reloadedResponse.json() as { termsAndConditions: unknown }).termsAndConditions, editedAndReorderedTerms);
+
+    const deleteResponse = await handleApiRequest(
+      authorizedRequest('/api/admin/official-document/terms', 'PUT', {
+        termsAndConditions: [editedAndReorderedTerms[0]],
+      }),
+      env,
+    );
+    assert.equal(deleteResponse.status, 200);
+    assert.deepEqual((await deleteResponse.json() as { termsAndConditions: unknown }).termsAndConditions, [editedAndReorderedTerms[0]]);
+  });
+
+  assert.equal(settingsRpcCalls, 3);
+  assert.equal(rpcPayloads.length, 3);
+  assert.equal(savedDocumentData.logoObjectKey, 'official-document-assets/eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee.png');
+  assert.equal(savedDocumentData.graphicObjectKey, 'official-document-assets/ffffffff-ffff-4fff-8fff-ffffffffffff.png');
+  assert.equal((savedDocumentData.colors as Record<string, unknown>).navy, '#234567');
+  assert.equal((savedDocumentData.layout as Record<string, unknown>).showDecorations, true);
+
+  await withAdminFetch('staff', handleSettingsRequest, async () => {
+    const readResponse = await handleApiRequest(
+      authorizedRequest('/api/admin/official-document/terms'),
+      env,
+    );
+    assert.equal(readResponse.status, 200);
+    assert.deepEqual(
+      (await readResponse.json() as { termsAndConditions: unknown }).termsAndConditions,
+      savedDocumentData.termsAndConditions,
+    );
+  });
+});
+
+test('terms RPC failures return a safe error and log Supabase diagnostics without request data', async () => {
+  const savedTerms: OfficialTermAndCondition[] = [
+    { id: 'existing-term', title: '', description: 'Existing saved terms.', displayOrder: 0, isActive: true },
+  ];
+  const requestTerms: OfficialTermAndCondition[] = [
+    { id: 'new-term', title: 'Private draft', description: 'Sensitive request-only wording.', displayOrder: 0, isActive: true },
+  ];
+  const env = makeWorkerEnv();
+  const originalConsoleError = console.error;
+  const diagnostics: unknown[][] = [];
+  console.error = (...args: unknown[]) => { diagnostics.push(args); };
+
+  try {
+    await withAdminFetch('super_admin', async (request, url) => {
+      if (url.pathname.endsWith('/rpc/update_official_document_settings')) {
+        return Response.json({
+          code: 'PGRST202',
+          message: 'Could not find function. Authorization: Bearer test-access-token learner@example.com',
+          details: 'Phone +1 (555) 123-4567',
+          hint: 'Reload the schema cache.',
+        }, { status: 404 });
+      }
+      if (url.pathname.endsWith('/official_document_settings')) {
+        return Response.json([{ document_data: { termsAndConditions: savedTerms } }]);
+      }
+      throw new Error(`Unexpected Supabase request: ${url.pathname}`);
+    }, async () => {
+      const response = await handleApiRequest(
+        authorizedRequest('/api/admin/official-document/terms', 'PUT', {
+          termsAndConditions: requestTerms,
+        }),
+        env,
+      );
+      assert.equal(response.status, 503);
+      assert.deepEqual(await response.json(), {
+        error: 'Unable to save Terms & Conditions. Your saved version has not been changed.',
+      });
+
+      const reload = await handleApiRequest(
+        authorizedRequest('/api/admin/official-document/terms'),
+        env,
+      );
+      assert.equal(reload.status, 200);
+      assert.deepEqual((await reload.json() as { termsAndConditions: unknown }).termsAndConditions, savedTerms);
+    });
+  } finally {
+    console.error = originalConsoleError;
+  }
+
+  assert.equal(diagnostics.length, 1);
+  const diagnosticText = JSON.stringify(diagnostics);
+  assert.match(diagnosticText, /PGRST202/);
+  assert.match(diagnosticText, /Could not find function/);
+  assert.match(diagnosticText, /Reload the schema cache/);
+  assert.match(diagnosticText, /REDACTED/);
+  assert.doesNotMatch(diagnosticText, /test-access-token|learner@example\.com|555|Sensitive request-only wording|Private draft/);
+});
+
+test('local Express forwards official document terms GET and PUT to the secured Worker API', async () => {
+  const server = await readFile(new URL('../server.ts', import.meta.url), 'utf8');
+  const routeList = server.match(/app\.all\(\s*\[([\s\S]*?)\]\s*,\s*dispatchWorkerApi\s*,\s*\);/);
+  assert.ok(routeList, 'Expected a shared Express-to-Worker route list');
+  assert.match(routeList[1], /'\/api\/admin\/official-document\/terms'/);
+
+  const adminPortal = await readFile(new URL('../src/pages/AdminPortal.tsx', import.meta.url), 'utf8');
+  assert.match(adminPortal, /requestJson\('\/api\/admin\/official-document\/terms',\s*\{\s*headers:/);
+  assert.match(adminPortal, /requestJson\('\/api\/admin\/official-document\/terms',\s*\{\s*method:\s*'PUT'/);
+  const expectedTerms: OfficialTermAndCondition[] = [
+    { id: 'local-route-term', title: 'Local route', description: 'Saved content.', displayOrder: 0, isActive: true },
+  ];
+  let persisted: OfficialTermAndCondition[] = [];
+  const env = makeWorkerEnv();
+  await withAdminFetch('super_admin', async (request, url) => {
+    if (url.pathname.endsWith('/official_document_settings')) {
+      return Response.json([{ document_data: { termsAndConditions: persisted } }]);
+    }
+    if (url.pathname.endsWith('/rpc/update_official_document_settings')) {
+      const body = await request.json() as { p_settings: { termsAndConditions: OfficialTermAndCondition[] } };
+      persisted = body.p_settings.termsAndConditions;
+      return Response.json({ settings: { termsAndConditions: persisted } });
+    }
+    throw new Error(`Unexpected Supabase request: ${url.pathname}`);
+  }, async () => {
+    const getResponse = await handleApiRequest(
+      authorizedRequest('/api/admin/official-document/terms'),
+      env,
+    );
+    assert.equal(getResponse.status, 200);
+    assert.deepEqual((await getResponse.json() as { termsAndConditions: unknown }).termsAndConditions, []);
+
+    const putResponse = await handleApiRequest(
+      authorizedRequest('/api/admin/official-document/terms', 'PUT', {
+        termsAndConditions: expectedTerms,
+      }),
+      env,
+    );
+    assert.equal(putResponse.status, 200);
+    assert.deepEqual((await putResponse.json() as { termsAndConditions: unknown }).termsAndConditions, expectedTerms);
+
+    const savedResponse = await handleApiRequest(
+      authorizedRequest('/api/admin/official-document/terms'),
+      env,
+    );
+    assert.equal(savedResponse.status, 200);
+    assert.deepEqual((await savedResponse.json() as { termsAndConditions: unknown }).termsAndConditions, expectedTerms);
+  });
+});
+
+test('official document terms reject invalid identifiers, duplicate ordering, and empty descriptions', async () => {
+  await withAdminFetch('super_admin', async (_request, url) => {
+    if (url.pathname.endsWith('/official_document_settings')) return Response.json([]);
+    throw new Error(`Terms validation must fail before persistence: ${url.pathname}`);
+  }, async () => {
+    for (const termsAndConditions of [
+      [{ id: 'duplicate', title: '', description: 'First', displayOrder: 0, isActive: true },
+        { id: 'duplicate', title: '', description: 'Second', displayOrder: 1, isActive: true }],
+      [{ id: 'a', title: '', description: 'First', displayOrder: 0, isActive: true },
+        { id: 'b', title: '', description: 'Second', displayOrder: 0, isActive: true }],
+      [{ id: 'a', title: '', description: ' \u0000 ', displayOrder: 0, isActive: true }],
+    ]) {
+      const response = await handleApiRequest(
+        authorizedRequest('/api/admin/official-document/terms', 'PUT', { termsAndConditions }),
+        makeWorkerEnv(),
+      );
+      assert.equal(response.status, 400);
+    }
+  });
+});
+
+test('official PDF logo replacement and removal persist without deleting stored R2 assets', async () => {
+  const existingKey = 'official-document-assets/eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee.png';
+  const uploadedKeys: string[] = [];
+  let r2Deletes = 0;
+  let documentData: Record<string, unknown> = {
+    ...DEFAULT_OFFICIAL_DOCUMENT_SETTINGS,
+    logoObjectKey: existingKey,
+  };
+  const env = makeWorkerEnv({
+    APPLICATION_MEDIA: {
+      get: async () => null,
+      put: async (key: string) => { uploadedKeys.push(key); },
+      delete: async () => { r2Deletes += 1; },
+      list: async () => ({ objects: [] }),
+    },
+  });
+  const handleSettingsRequest = async (request: Request, url: URL) => {
+    if (url.pathname.endsWith('/official_document_settings') && request.method === 'GET') {
+      return Response.json([{ document_data: documentData }]);
+    }
+    if (url.pathname.endsWith('/rpc/update_official_document_settings')) {
+      const body = await request.json() as { p_settings: Record<string, unknown> };
+      documentData = {
+        ...documentData,
+        ...body.p_settings,
+        layout: {
+          ...(documentData.layout as Record<string, unknown>),
+          ...(body.p_settings.layout as Record<string, unknown> || {}),
+        },
+      };
+      return Response.json({ settings: documentData, updated_at: '2026-11-06T00:00:00Z' });
+    }
+    throw new Error(`Unexpected Supabase request: ${url.pathname}`);
+  };
+
+  await withAdminFetch('super_admin', handleSettingsRequest, async () => {
+    const replacementResponse = await handleApiRequest(
+      authorizedRequest('/api/admin/official-document', 'PUT', {
+        settings: documentData,
+        logo_file_base64: `data:image/png;base64,${Buffer.from(pngBytes).toString('base64')}`,
+      }),
+      env,
+    );
+    assert.equal(replacementResponse.status, 200);
+    const replacement = await replacementResponse.json() as {
+      settings: Record<string, unknown>;
+      has_logo: boolean;
+    };
+    assert.equal(replacement.settings.logoObjectKey, null);
+    assert.equal(replacement.has_logo, true);
+    assert.doesNotMatch(JSON.stringify(replacement), /official-document-assets\/[0-9a-f-]+\.png/i);
+    const replacementKey = String(documentData.logoObjectKey);
+    assert.match(replacementKey, /^official-document-assets\/[0-9a-f-]+\.png$/i);
+    assert.notEqual(replacementKey, existingKey);
+
+    const removalResponse = await handleApiRequest(
+      authorizedRequest('/api/admin/official-document', 'PUT', {
+        settings: {
+          ...replacement.settings,
+          layout: {
+            ...replacement.settings.layout as Record<string, unknown>,
+            showLogo: false,
+          },
+        },
+        remove_logo: true,
+      }),
+      env,
+    );
+    assert.equal(removalResponse.status, 200);
+
+    const reloadResponse = await handleApiRequest(
+      authorizedRequest('/api/admin/official-document'),
+      env,
+    );
+    assert.equal(reloadResponse.status, 200);
+    const reloaded = await reloadResponse.json() as { settings: Record<string, unknown>; has_logo: boolean };
+    assert.equal(reloaded.settings.logoObjectKey, null);
+    assert.equal(reloaded.has_logo, false);
+    assert.equal((reloaded.settings.layout as Record<string, unknown>).showLogo, false);
+  });
+
+  assert.equal(uploadedKeys.length, 1);
+  assert.equal(r2Deletes, 0);
 });
 
 test('official PDF logo assets remain available while fee confirmation PDF is removed', async () => {
@@ -1105,6 +1601,38 @@ test('official PDF logo assets remain available while fee confirmation PDF is re
   assert.match(adminPortal, /api\/admin\/official-document\/assets/);
   assert.doesNotMatch(adminPortal, /generateStudentConfirmationPdf|Enrollment & Fee Confirmation|FEE SUMMARY/);
   assert.doesNotMatch(adminPortal, /const logoUrl = "https:\/\/gpnfznwqwaokfzmozpxo\.supabase\.co/);
+});
+
+test('Admin Portal renders the role-gated Terms editor after PDF settings and loads it independently', async () => {
+  const adminPortal = await readFile(new URL('../src/pages/AdminPortal.tsx', import.meta.url), 'utf8');
+  const settingsTabIndex = adminPortal.indexOf("{activeTab === 'settings' && (");
+  const settingsFormIndex = adminPortal.indexOf('saveOfficialDocumentSettings().catch');
+  const settingsFormEndIndex = adminPortal.indexOf('</form>}', settingsFormIndex);
+  const termsEditorIndex = adminPortal.indexOf('aria-labelledby="official-terms-heading"');
+  assert.ok(settingsTabIndex >= 0);
+  assert.ok(settingsFormIndex > settingsTabIndex);
+  assert.ok(settingsFormEndIndex > settingsFormIndex);
+  assert.ok(termsEditorIndex > settingsFormEndIndex);
+
+  const settingsNavigation = adminPortal.match(/\{ id: 'settings', label: 'Settings & PDF Config', icon: Settings, minRole: 'staff' \}/);
+  assert.ok(settingsNavigation, 'Settings must remain reachable by Staff and higher roles');
+  assert.match(adminPortal, /void fetchOfficialDocumentTerms\(\);\s*if \(isSuperAdmin\) void fetchOfficialDocumentSettings\(\);/);
+  assert.match(adminPortal, /readOnly={!isSuperAdmin}/);
+  assert.match(adminPortal, /disabled={!isSuperAdmin}/);
+  assert.match(adminPortal, /Add Condition/);
+  assert.match(adminPortal, /Save Terms & Conditions/);
+  assert.match(adminPortal, /Cancel \/ Restore Saved Version/);
+  assert.match(adminPortal, /Preview Unsaved Terms/);
+  assert.match(adminPortal, /No approved Terms & Conditions are saved/);
+
+  const settingsLoaderStart = adminPortal.indexOf('const fetchOfficialDocumentSettings = async');
+  const settingsLoaderEnd = adminPortal.indexOf('const saveOfficialDocumentSettings = async', settingsLoaderStart);
+  const settingsLoader = adminPortal.slice(settingsLoaderStart, settingsLoaderEnd);
+  assert.match(settingsLoader, /typeof result\.has_logo === 'boolean'/);
+  assert.match(settingsLoader, /typeof result\.has_graphic === 'boolean'/);
+  assert.match(settingsLoader, /Promise\.allSettled/);
+  assert.doesNotMatch(settingsLoader, /setOfficialTermsLoadError/);
+  assert.doesNotMatch(adminPortal, /Saved official document asset status is missing or invalid/);
 });
 
 test('program course mode is saved as a nullable admin-editable program field', async () => {

@@ -269,7 +269,7 @@ export const AboutUs: React.FC<AboutUsProps> = ({
               </div>
               <h3 className="text-xl font-bold text-slate-900 mb-3">Our Vision</h3>
               <p className="text-sm text-slate-600 leading-relaxed">
-                To empower every learner in Davangere and surrounding regions with natural, articulate English communication skills, unlocking global opportunities and lifelong personal confidence.
+                To empower every learner in and around Davangere with natural, fluent English communication skills, unlocking global opportunities and lifelong personal confidence.
               </p>
             </div>
             <div className="pt-6 mt-6 border-t border-slate-100 flex items-center gap-2 text-xs font-semibold text-orange-600">
@@ -286,7 +286,7 @@ export const AboutUs: React.FC<AboutUsProps> = ({
               </div>
               <h3 className="text-xl font-bold text-slate-900 mb-3">Our Mission</h3>
               <p className="text-sm text-slate-600 leading-relaxed">
-                To provide high-quality, practical spoken English and grammar training through interactive classroom sessions, supportive mentorship, and real-world conversation practice.
+                To provide high-quality, practical spoken English and grammar training through interactive classroom sessions, supportive mentorship, and real-world conversation practice that builds lifelong fluency.
               </p>
             </div>
             <div className="pt-6 mt-6 border-t border-slate-100 flex items-center gap-2 text-xs font-semibold text-emerald-600">
@@ -303,7 +303,7 @@ export const AboutUs: React.FC<AboutUsProps> = ({
               </div>
               <h3 className="text-xl font-bold text-slate-900 mb-3">Our Values</h3>
               <p className="text-sm text-slate-600 leading-relaxed">
-                Integrity, student-centric mentorship, continuous speaking practice, mutual respect, encouragement, and practical applicability in career and social settings.
+                Rooted in integrity and student-centric mentorship, we champion continuous speaking practice, mutual respect, encouragement, and real-world English skills for life and career success.
               </p>
             </div>
             <div className="pt-6 mt-6 border-t border-slate-100 flex items-center gap-2 text-xs font-semibold text-amber-600">

@@ -1643,6 +1643,7 @@ app.all(
     '/api/admin/demo-class-requests/:id',
     '/api/admin/demo-class-requests/:id/photo',
     '/api/admin/official-document',
+    '/api/admin/official-document/terms',
     '/api/admin/official-document/preview',
     '/api/admin/official-document/issued',
     '/api/admin/official-document/assets',

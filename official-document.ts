@@ -11,6 +11,14 @@ export type OfficialFontFamily = 'Helvetica' | 'TimesRoman' | 'Courier';
 export type OfficialPageSize = 'A4' | 'Letter';
 export type OfficialSection = 'student' | 'course' | 'joining';
 
+export interface OfficialTermAndCondition {
+  id: string;
+  title: string;
+  description: string;
+  displayOrder: number;
+  isActive: boolean;
+}
+
 export interface OfficialDocumentSettings {
   academyName: string;
   address: string;
@@ -25,6 +33,7 @@ export interface OfficialDocumentSettings {
   footerText: string;
   motivationalTagline: string;
   joiningInstructions?: string[];
+  termsAndConditions: OfficialTermAndCondition[];
   logoObjectKey: string | null;
   graphicObjectKey: string | null;
   colors: {
@@ -118,6 +127,7 @@ export const DEFAULT_OFFICIAL_DOCUMENT_SETTINGS: OfficialDocumentSettings = {
   footerText: "Uptrend's English Academy - Davangere",
   motivationalTagline: 'Learn English • Build Confidence • Achieve More',
   joiningInstructions: [],
+  termsAndConditions: [],
   logoObjectKey: null,
   graphicObjectKey: null,
   colors: {
@@ -200,6 +210,13 @@ export async function generateOfficialPdf({
   const [pageWidth, pageHeight] = pageDimensions(settings.layout.pageSize);
   const margin = 38;
   const contentWidth = pageWidth - margin * 2;
+  let footerHeight = 62;
+  let footerLines: Array<{
+    text: string;
+    font: PDFFont;
+    size: number;
+    color: ReturnType<typeof rgb>;
+  }> = [];
   const spacing = Math.max(0.85, Math.min(settings.layout.spacing, 1.25));
   const bodySize = settings.typography.bodySize;
   const headingSize = settings.typography.headingSize;
@@ -210,7 +227,7 @@ export async function generateOfficialPdf({
   let studentPhoto: PDFImage | null = null;
   let decorativeGraphic: PDFImage | null = null;
 
-  if (assets?.logo) {
+  if (assets?.logo && settings.layout.showLogo) {
     logoImage = assets.logo.mime === 'image/png'
       ? await pdf.embedPng(assets.logo.bytes)
       : await pdf.embedJpg(assets.logo.bytes);
@@ -264,7 +281,7 @@ export async function generateOfficialPdf({
   };
 
   const ensureRoom = (height: number) => {
-    if (y - height < margin + 47) addPage();
+    if (y - height < margin + (settings.layout.showFooter ? footerHeight + 8 : 10)) addPage();
   };
 
   const drawWrapped = (
@@ -313,7 +330,7 @@ export async function generateOfficialPdf({
   };
 
   const drawSectionTitle = (title: string) => {
-    ensureRoom(34);
+    ensureRoom(65);
     y -= 3 * spacing;
     page.drawRectangle({
       x: margin,
@@ -367,6 +384,27 @@ export async function generateOfficialPdf({
     return lines.length ? lines : [''];
   };
 
+  if (settings.layout.showFooter) {
+    footerLines = [
+      ...wrapTextLines(settings.academyName, bold, 8, contentWidth).map((text) => ({
+        text, font: bold, size: 8, color: colors.navy,
+      })),
+      ...wrapTextLines(settings.motivationalTagline, regular, 7, contentWidth).map((text) => ({
+        text, font: regular, size: 7, color: colors.orange,
+      })),
+      ...wrapTextLines(settings.address, regular, 6, contentWidth).map((text) => ({
+        text, font: regular, size: 6, color: colors.muted,
+      })),
+      ...wrapTextLines([settings.phone, settings.email].filter(Boolean).join('  |  '), regular, 6, contentWidth).map((text) => ({
+        text, font: regular, size: 6, color: colors.muted,
+      })),
+      ...wrapTextLines('https://uptrendsenglishacademy.in', regular, 6.5, contentWidth - 82).map((text) => ({
+        text, font: regular, size: 6.5, color: colors.navy,
+      })),
+    ];
+    footerHeight = Math.max(62, 22 + footerLines.length * 9);
+  }
+
   const drawPair = (label: string, value: string, x: number, rowWidth: number, shaded = false) => {
     const labelWidth = Math.min(126, rowWidth * 0.38);
     const labelSize = Math.max(8, bodySize - 0.5);
@@ -419,10 +457,17 @@ export async function generateOfficialPdf({
     });
   }
   const academyX = margin + (logoImage ? 80 : 0);
-  page.drawText(printable(settings.academyName), {
+  const academyName = printable(settings.academyName);
+  const academyMaxWidth = pageWidth - margin - academyX;
+  const academyBaseSize = Math.min(settings.typography.titleSize + 1, 21);
+  const academySize = Math.min(
+    academyBaseSize,
+    academyMaxWidth / Math.max(1, bold.widthOfTextAtSize(academyName, academyBaseSize)) * academyBaseSize,
+  );
+  page.drawText(academyName, {
     x: academyX,
     y: pageHeight - 39,
-    size: Math.min(settings.typography.titleSize + 1, 21),
+    size: academySize,
     font: bold,
     color: colors.navy,
     maxWidth: pageWidth - margin - academyX,
@@ -636,6 +681,66 @@ export async function generateOfficialPdf({
     }
   };
 
+  const drawTermsAndConditions = () => {
+    const activeTerms = settings.termsAndConditions
+      .filter((term) => term.isActive)
+      .sort((left, right) => left.displayOrder - right.displayOrder);
+    if (!activeTerms.length) return;
+
+    drawSectionTitle('TERMS & CONDITIONS');
+    const lineGap = bodySize * 1.45 * spacing;
+    for (const [index, term] of activeTerms.entries()) {
+      const titleLines = term.title.trim()
+        ? wrapTextLines(`${index + 1}. ${term.title}`, bold, bodySize, contentWidth - 8)
+        : [];
+      const descriptionLines = term.description.replace(/\r\n?/g, '\n').split('\n').flatMap((line) =>
+        line.trim()
+          ? wrapTextLines(line, regular, bodySize, contentWidth - 18).map((text) => ({ text, gap: lineGap }))
+          : [{ text: '', gap: lineGap * 0.75 }],
+      );
+      if (!titleLines.length && descriptionLines.length) {
+        const firstDescriptionLine = descriptionLines[0].text;
+        const numberedLines = wrapTextLines(`${index + 1}. ${firstDescriptionLine}`, regular, bodySize, contentWidth - 18);
+        descriptionLines[0] = {
+          text: numberedLines[0],
+          gap: descriptionLines[0].gap,
+        };
+        descriptionLines.splice(1, 0, ...numberedLines.slice(1).map((text) => ({ text, gap: lineGap })));
+      }
+      const firstTextLineHeight = descriptionLines.some((line) => line.text) ? lineGap : 0;
+      ensureRoom(titleLines.length * lineGap + firstTextLineHeight + 10);
+
+      titleLines.forEach((line) => {
+        ensureRoom(lineGap);
+        page.drawText(line, {
+          x: margin + 2,
+          y,
+          size: bodySize,
+          font: bold,
+          color: colors.navy,
+          maxWidth: contentWidth - 8,
+        });
+        y -= lineGap;
+      });
+
+      for (const line of descriptionLines) {
+        if (line.text) {
+          ensureRoom(lineGap);
+          page.drawText(line.text, {
+            x: margin + (titleLines.length ? 18 : 8),
+            y,
+            size: bodySize,
+            font: regular,
+            color: colors.ink,
+            maxWidth: contentWidth - 26,
+          });
+        }
+        y -= line.gap;
+      }
+      y -= 5 * spacing;
+    }
+  };
+
   const sectionDrawers: Record<OfficialSection, () => void> = {
     student: drawStudent,
     course: drawCourse,
@@ -652,40 +757,29 @@ export async function generateOfficialPdf({
   if (settings.welcomeMessage) {
     drawWrapped(settings.welcomeMessage, margin, { color: colors.muted, size: bodySize - 0.25 });
   }
+  drawTermsAndConditions();
 
   if (settings.layout.showFooter) {
     pages.forEach((currentPage, index) => {
-      currentPage.drawRectangle({ x: 0, y: 0, width: pageWidth, height: 43, color: colors.paleBlue });
-      currentPage.drawRectangle({ x: 0, y: 43, width: pageWidth, height: 2, color: colors.navy });
-      currentPage.drawRectangle({ x: 0, y: 40, width: pageWidth, height: 2, color: colors.orange });
-      currentPage.drawText(printable(settings.academyName), {
-        x: margin,
-        y: 30,
-        size: 8,
-        font: bold,
-        color: colors.navy,
-        maxWidth: contentWidth - 64,
-      });
-      currentPage.drawText(printable(settings.motivationalTagline), {
-        x: margin,
-        y: 18,
-        size: 7,
-        font: regular,
-        color: colors.orange,
-        maxWidth: contentWidth - 100,
-      });
-      currentPage.drawText(`${printable(settings.footerText || 'Davangere, Karnataka')}  |  https://uptrendsenglishacademy.in`, {
-        x: margin,
-        y: 6,
-        size: 6.5,
-        font: regular,
-        color: colors.muted,
-        maxWidth: contentWidth - 82,
+      currentPage.drawRectangle({ x: 0, y: 0, width: pageWidth, height: footerHeight, color: colors.paleBlue });
+      currentPage.drawRectangle({ x: 0, y: footerHeight, width: pageWidth, height: 2, color: colors.navy });
+      currentPage.drawRectangle({ x: 0, y: footerHeight - 3, width: pageWidth, height: 2, color: colors.orange });
+      let footerY = footerHeight - 14;
+      footerLines.forEach((line) => {
+        currentPage.drawText(line.text, {
+          x: margin,
+          y: footerY,
+          size: line.size,
+          font: line.font,
+          color: line.color,
+          maxWidth: contentWidth - (line.text.startsWith('https://') ? 82 : 0),
+        });
+        footerY -= 9;
       });
       const pageLabel = `Page ${index + 1} of ${pages.length}`;
       currentPage.drawText(pageLabel, {
         x: pageWidth - margin - bold.widthOfTextAtSize(pageLabel, 7.5),
-        y: 7,
+        y: 9,
         size: 7.5,
         font: bold,
         color: colors.navy,
@@ -724,6 +818,9 @@ export const isValidOfficialDocumentSettings = (
   const isHexColor = (color: unknown): color is string =>
     typeof color === 'string' && /^#[0-9a-f]{6}$/i.test(color);
   const sections: OfficialSection[] = ['student', 'course', 'joining'];
+  const terms = Array.isArray(settings.termsAndConditions) ? settings.termsAndConditions : [];
+  const termIds = terms.map((term) => term?.id);
+  const termOrders = terms.map((term) => term?.displayOrder);
   return typeof settings.academyName === 'string' &&
     typeof settings.address === 'string' &&
     typeof settings.phone === 'string' &&
@@ -736,6 +833,20 @@ export const isValidOfficialDocumentSettings = (
     typeof settings.motivationalTagline === 'string' &&
     Array.isArray(settings.joiningInstructions ?? []) &&
     (settings.joiningInstructions ?? []).every((instruction) => typeof instruction === 'string') &&
+    Array.isArray(settings.termsAndConditions) &&
+    settings.termsAndConditions.every((term) =>
+      term !== null &&
+      term !== undefined &&
+      typeof term === 'object' &&
+      typeof term.id === 'string' &&
+      typeof term.title === 'string' &&
+      typeof term.description === 'string' &&
+      Boolean(term.description.trim()) &&
+      Number.isInteger(term.displayOrder) &&
+      typeof term.isActive === 'boolean',
+    ) &&
+    new Set(termIds).size === termIds.length &&
+    new Set(termOrders).size === termOrders.length &&
     settings.sectionHeadings !== undefined &&
     sections.every((section) => typeof settings.sectionHeadings?.[section] === 'string') &&
     settings.colors !== undefined &&
@@ -786,6 +897,10 @@ export const mergeOfficialDocumentSettings = (
   const savedLayout = saved.layout && typeof saved.layout === 'object'
     ? saved.layout as Record<string, unknown>
     : {};
+  if (Object.prototype.hasOwnProperty.call(saved, 'termsAndConditions') &&
+    !Array.isArray(saved.termsAndConditions)) {
+    return null;
+  }
   const sections: OfficialSection[] = ['student', 'course', 'joining'];
   const visibleSections = Array.isArray(savedLayout.visibleSections)
     ? savedLayout.visibleSections.filter((section): section is OfficialSection => sections.includes(section as OfficialSection))
@@ -807,6 +922,9 @@ export const mergeOfficialDocumentSettings = (
     },
     joiningInstructions: Array.isArray(saved.joiningInstructions)
       ? saved.joiningInstructions as string[]
+      : [],
+    termsAndConditions: Array.isArray(saved.termsAndConditions)
+      ? saved.termsAndConditions as OfficialTermAndCondition[]
       : [],
     colors: {
       ...DEFAULT_OFFICIAL_DOCUMENT_SETTINGS.colors,
