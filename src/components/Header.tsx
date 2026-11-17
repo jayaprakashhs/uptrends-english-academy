@@ -10,6 +10,13 @@ import {
 } from 'lucide-react';
 import { SiteBranding } from '../types';
 
+const socialLinks = [
+  { name: 'WhatsApp', url: 'https://wa.me/919008000211?text=Hi%20Sir%2C%20I%20am%20interested%20in%20joining%20Uptrend%27s%20English%20Academy.%20I%20would%20like%20to%20know%20more%20about%20your%20Spoken%20English%20courses%2E', color: '#25D366' },
+  { name: 'Instagram', url: 'https://www.instagram.com/uptrendsenglishacademy/', color: 'instagram' },
+  { name: 'Facebook', url: 'https://www.facebook.com/UptrendEnglishAcademy', color: '#1877F2' },
+  { name: 'YouTube', url: 'https://www.youtube.com/@SpeakEnglishConfidently123', color: '#FF0000' },
+] as const;
+
 interface HeaderProps {
   currentPage: string;
   setCurrentPage: (page: string) => void;
@@ -119,9 +126,9 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
       </div>
 
-      {/* Main navigation — exactly 80px high */}
+      {/* Main navigation — 80px primary row */}
       <div className="mx-auto max-w-[1600px] px-3 sm:px-5 2xl:px-8">
-        <div className="flex h-20 items-center gap-4">
+        <div className="flex h-20 items-center gap-1 sm:gap-4">
           {/* Main logo */}
           <button
             onClick={() => handleNavigate('home')}
@@ -186,11 +193,11 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
 
           {/* Mobile and tablet menu button */}
-          <div className="ml-auto flex shrink-0 items-center gap-2 lg:hidden">
+          <div className="ml-auto flex shrink-0 items-center gap-1 lg:hidden">
             <button
               type="button"
               onClick={() => openCallbackModal()}
-              className="rounded-lg border border-orange-200 p-2 text-orange-600 transition-colors hover:bg-orange-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-700 motion-reduce:transition-none md:hidden"
+              className="max-[359px]:hidden rounded-lg border border-orange-200 p-2 text-orange-600 transition-colors hover:bg-orange-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-700 motion-reduce:transition-none md:hidden"
               aria-label="Request a call"
               title="Request a Call"
             >
@@ -216,6 +223,69 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
           </div>
         </div>
+
+        <nav
+          aria-label="Social media"
+          className="flex justify-center gap-1 pb-1 md:hidden"
+        >
+          {socialLinks.map((link) => (
+            <a
+              key={link.name}
+              href={link.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label={`Visit us on ${link.name}`}
+              className="flex h-10 w-10 items-center justify-center rounded-full transition-transform hover:scale-110 active:scale-95 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-700 motion-reduce:transition-none"
+            >
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 24 24"
+                className="h-[22px] w-[22px]"
+              >
+                {link.name === 'WhatsApp' && (
+                  <path
+                    fill={link.color}
+                    d="M20.52 3.48A11.82 11.82 0 0 0 12.1 0C5.56 0 .23 5.32.23 11.86c0 2.09.55 4.13 1.59 5.93L.13 24l6.36-1.67a11.85 11.85 0 0 0 5.6 1.42h.01c6.54 0 11.87-5.32 11.87-11.86 0-3.17-1.23-6.15-3.45-8.41ZM12.1 21.73h-.01a9.86 9.86 0 0 1-5.02-1.37l-.36-.21-3.77.99 1.01-3.67-.24-.38a9.84 9.84 0 0 1-1.51-5.23c0-5.46 4.45-9.9 9.91-9.9a9.84 9.84 0 0 1 7.01 2.9 9.84 9.84 0 0 1 2.9 7c0 5.46-4.45 9.9-9.92 9.9Zm5.44-7.42c-.3-.15-1.77-.87-2.04-.97-.28-.1-.48-.15-.68.15-.2.3-.78.97-.96 1.17-.18.2-.35.22-.65.07-.3-.15-1.26-.46-2.4-1.47-.89-.79-1.49-1.77-1.67-2.07-.17-.3-.02-.46.13-.61.13-.13.3-.35.45-.53.15-.18.2-.3.3-.5.1-.2.05-.38-.03-.53-.07-.15-.67-1.62-.92-2.22-.24-.58-.49-.5-.67-.51h-.57c-.2 0-.53.08-.81.38-.28.3-1.06 1.03-1.06 2.5s1.08 2.9 1.23 3.1c.15.2 2.13 3.25 5.16 4.55.72.31 1.28.5 1.72.64.72.23 1.37.2 1.88.12.57-.08 1.77-.72 2.02-1.42.25-.7.25-1.3.18-1.42-.08-.13-.28-.2-.58-.35Z"
+                  />
+                )}
+                {link.name === 'Instagram' && (
+                  <>
+                    <defs>
+                      <linearGradient id="instagram-icon-gradient" x1="0%" y1="100%" x2="100%" y2="0%">
+                        <stop offset="0%" stopColor="#FFDC80" />
+                        <stop offset="50%" stopColor="#F56040" />
+                        <stop offset="100%" stopColor="#C13584" />
+                      </linearGradient>
+                    </defs>
+                    <path
+                      fill="url(#instagram-icon-gradient)"
+                      d="M7 2h10a5 5 0 0 1 5 5v10a5 5 0 0 1-5 5H7a5 5 0 0 1-5-5V7a5 5 0 0 1 5-5Zm0 2a3 3 0 0 0-3 3v10a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3V7a3 3 0 0 0-3-3H7Zm5 3a5 5 0 1 1 0 10 5 5 0 0 1 0-10Zm0 2a3 3 0 1 0 0 6 3 3 0 0 0 0-6Zm5.25-3.25a1.25 1.25 0 1 1 0 2.5 1.25 1.25 0 0 1 0-2.5Z"
+                    />
+                  </>
+                )}
+                {link.name === 'Facebook' && (
+                  <path
+                    fill={link.color}
+                    d="M24 12a12 12 0 1 0-13.88 11.86v-8.39H7.08V12h3.04V9.35c0-3 1.79-4.66 4.53-4.66 1.31 0 2.68.23 2.68.23v2.95h-1.51c-1.49 0-1.96.93-1.96 1.88V12h3.34l-.53 3.47h-2.81v8.39A12 12 0 0 0 24 12Z"
+                  />
+                )}
+                {link.name === 'YouTube' && (
+                  <>
+                    <rect
+                      x="1"
+                      y="4"
+                      width="22"
+                      height="16"
+                      rx="5"
+                      fill={link.color}
+                    />
+                    <path fill="#fff" d="M10 8.5v7l6-3.5-6-3.5Z" />
+                  </>
+                )}
+              </svg>
+            </a>
+          ))}
+        </nav>
       </div>
 
       {/* Mobile and tablet navigation drawer */}
