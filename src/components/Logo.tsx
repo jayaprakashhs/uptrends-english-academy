@@ -24,7 +24,7 @@ export const Logo: React.FC<LogoProps> = ({
     sm: 'w-[120px] h-[32px] sm:w-[140px] sm:h-[40px]',
     md: 'w-[140px] h-[40px] sm:w-[160px] sm:h-[46px] lg:w-[180px] lg:h-[52px]',
     lg: 'w-[160px] h-[46px] sm:w-[180px] sm:h-[52px] lg:w-[200px] lg:h-[58px]',
-    compact: 'w-[100px] h-[27px] min-[360px]:w-[120px] min-[360px]:h-[32px] min-[640px]:w-[140px] min-[640px]:h-[40px]',
+    compact: 'w-[calc(100vw_-_274px)] h-[27px] min-[360px]:h-[32px] min-[394px]:w-[120px] min-[640px]:w-[140px] min-[640px]:h-[40px]',
   };
 
   // The supplied logo URL takes priority over the default logo.

@@ -209,7 +209,7 @@ export const Header: React.FC<HeaderProps> = ({
       </div>
 
       {/* Main navigation — 80px primary row */}
-      <div className="mx-auto max-w-[1600px] px-1 sm:px-5 2xl:px-8">
+      <div className="mx-auto max-w-[1600px] px-0.5 sm:px-5 2xl:px-8">
         <div className="flex h-20 items-center gap-0 sm:gap-4">
           {/* Main logo */}
           <button
@@ -275,12 +275,17 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
 
           {/* Mobile and tablet menu button */}
-          <div className="ml-auto flex shrink-0 items-center gap-1 lg:hidden">
-            <SocialIcons idPrefix="mobile" navClassName="md:hidden" />
+          <div className="ml-auto flex shrink-0 items-center gap-0 lg:hidden">
+            <SocialIcons
+              idPrefix="mobile"
+              navClassName="gap-2.5 md:hidden"
+              linkSizeClassName="h-10 w-10"
+              iconSizeClassName="h-6 w-6"
+            />
             <button
               type="button"
               onClick={() => openCallbackModal()}
-              className="rounded-lg border border-orange-200 p-2 text-orange-600 transition-colors hover:bg-orange-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-700 motion-reduce:transition-none md:hidden"
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-orange-200 p-0 text-orange-600 transition-colors hover:bg-orange-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-700 motion-reduce:transition-none md:hidden"
               aria-label="Request a call"
               title="Request a Call"
             >
@@ -290,7 +295,7 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               type="button"
               onClick={() => setMobileMenuOpen((open) => !open)}
-              className="rounded-lg p-2 text-slate-700 transition-colors hover:bg-orange-50 hover:text-orange-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-600 motion-reduce:transition-none"
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg p-0 text-slate-700 transition-colors hover:bg-orange-50 hover:text-orange-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-600 motion-reduce:transition-none"
               aria-label={
                 mobileMenuOpen
                   ? 'Close navigation menu'
