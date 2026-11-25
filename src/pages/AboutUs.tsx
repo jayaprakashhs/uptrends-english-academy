@@ -1,8 +1,9 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import type { TeamMember } from '../types';
-import { Target, Compass, Heart, Play, Clock, MapPin, Phone, Mail, Award, CheckCircle, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Target, Compass, Heart, Play, Clock, MapPin, Phone, Mail, Award, CheckCircle, UsersRound } from 'lucide-react';
 import { getYouTubeThumbnail, extractYouTubeId } from '../lib/youtube';
 import { supabase } from '../lib/supabase';
+import { InstructorProfileCard } from '../components/InstructorProfileCard';
 
 interface AboutUsProps {
   openVideoModal: (url: string, title: string) => void;
@@ -20,8 +21,6 @@ export const AboutUs: React.FC<AboutUsProps> = ({
   setCurrentPage,
 }) => {
   const [publishedTeam, setPublishedTeam] = useState<TeamMember[]>([]);
-  const [instructorIndex, setInstructorIndex] = useState(0);
-  const touchStartX = useRef<number | null>(null);
   const [instructorsLoading, setInstructorsLoading] = useState(true);
   const [instructorError, setInstructorError] = useState<string | null>(null);
   const [instructorAssetWarning, setInstructorAssetWarning] = useState<string | null>(null);
@@ -32,33 +31,6 @@ export const AboutUs: React.FC<AboutUsProps> = ({
   const teamTalkVideoId = extractYouTubeId(teamTalkUrl);
   const teamTalkThumb = videoPosterUrl
     || getYouTubeThumbnail(teamTalkVideoId, 'maxresdefault');
-  const instructorListKey = publishedTeam.map((member) => member.id).join('|');
-
-  useEffect(() => {
-    setInstructorIndex(0);
-  }, [instructorListKey]);
-
-  const visibleInstructorIndex = Math.min(instructorIndex, Math.max(0, publishedTeam.length - 1));
-  const goToPreviousInstructor = () => {
-    setInstructorIndex((index) => Math.max(0, Math.min(index, publishedTeam.length - 1) - 1));
-  };
-  const goToNextInstructor = () => {
-    setInstructorIndex((index) => Math.min(publishedTeam.length - 1, index + 1));
-  };
-  const handleInstructorTouchStart = (event: React.TouchEvent<HTMLElement>) => {
-    touchStartX.current = event.changedTouches[0]?.clientX ?? null;
-  };
-  const handleInstructorTouchEnd = (event: React.TouchEvent<HTMLElement>) => {
-    const startX = touchStartX.current;
-    touchStartX.current = null;
-    const endX = event.changedTouches[0]?.clientX;
-    if (startX === null || endX === undefined) return;
-    const distance = endX - startX;
-    if (Math.abs(distance) < 50) return;
-    if (distance < 0) goToNextInstructor();
-    else goToPreviousInstructor();
-  };
-
   useEffect(() => {
     let active = true;
     const loadAboutContent = async () => {
@@ -74,7 +46,7 @@ export const AboutUs: React.FC<AboutUsProps> = ({
       const [instructorResult, videoResult] = await Promise.all([
         client
           .from('team_members')
-          .select('id, full_name, designation, qualifications, bio, photo_object_key, is_published, display_order')
+          .select('id, full_name, designation, qualifications, teaching_skills, bio, photo_object_key, is_published, display_order')
           .eq('is_published', true)
           .order('display_order', { ascending: true })
           .order('created_at', { ascending: true }),
@@ -133,35 +105,6 @@ export const AboutUs: React.FC<AboutUsProps> = ({
     };
   }, []);
 
-  const renderInstructorCard = (member: TeamMember) => (
-    <article
-      key={member.id}
-      className="relative flex min-h-[25rem] w-full flex-col items-center rounded-2xl border border-slate-100 bg-white px-6 pb-9 pt-16 text-center shadow-[0_12px_35px_rgba(15,35,65,0.08)]"
-    >
-      {member.photo_url ? (
-        <img
-          src={member.photo_url}
-          alt={member.full_name}
-          className="absolute left-1/2 top-0 h-24 w-24 -translate-x-1/2 -translate-y-1/2 rounded-full border-4 border-orange-500 bg-white object-cover shadow-md"
-        />
-      ) : (
-        <div
-          aria-hidden="true"
-          className="absolute left-1/2 top-0 flex h-24 w-24 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-4 border-orange-500 bg-orange-100 text-2xl font-bold text-orange-700 shadow-md"
-        >
-          {member.full_name.charAt(0)}
-        </div>
-      )}
-      <h3 className="break-words text-xl font-bold leading-snug text-[#0B1F4D]">{member.full_name}</h3>
-      <p className="mt-1 break-words text-sm font-semibold leading-snug text-orange-600">{member.designation}</p>
-      <span aria-hidden="true" className="my-4 h-px w-14 bg-orange-400" />
-      {member.qualifications && (
-        <p className="text-sm italic leading-relaxed text-slate-500">{member.qualifications}</p>
-      )}
-      <p className="mt-5 w-full whitespace-pre-wrap break-words text-center text-sm leading-7 text-slate-500">{member.bio}</p>
-    </article>
-  );
-
   return (
     <div className="space-y-16 py-12">
       {/* 1. Header Banner & About the Academy */}
@@ -180,15 +123,18 @@ export const AboutUs: React.FC<AboutUsProps> = ({
       </section>
 
       {/* 2. Meet Our Team (Admin managed, no invented staff) */}
-      <section className="relative isolate mx-auto max-w-7xl overflow-hidden rounded-3xl bg-[#fff8ef] px-4 py-10 sm:px-6 sm:py-12 lg:px-8">
-        <span aria-hidden="true" className="pointer-events-none absolute -left-12 top-24 h-40 w-40 rounded-full bg-sky-100/80" />
-        <span aria-hidden="true" className="pointer-events-none absolute -right-10 bottom-8 h-52 w-52 rounded-full bg-orange-50/90" />
-        <div className="relative z-10 mb-12 text-center lg:text-left">
-          <h2 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-950">
-            Meet Our <span className="text-orange-600">Instructors</span>
+      <section className="relative isolate mx-auto max-w-7xl overflow-hidden px-4 pb-20 pt-10 sm:px-6 sm:pb-24 sm:pt-12 lg:px-8">
+        <div className="relative z-10 mb-7 text-center sm:mb-8">
+          <div className="mb-1 flex items-center justify-center gap-5" aria-hidden="true">
+            <span className="h-px w-20 max-w-[22vw] bg-[#FE8101]" />
+            <UsersRound className="h-8 w-8 fill-[#029522] text-[#029522]" />
+            <span className="h-px w-20 max-w-[22vw] bg-[#FE8101]" />
+          </div>
+          <h2 className="text-3xl font-extrabold tracking-tight text-[#075B36] sm:text-4xl">
+            Meet Our <span className="text-[#FE8101]">Instructors</span>
           </h2>
-          <p className="mx-auto mt-2 max-w-2xl text-sm text-slate-600 lg:mx-0">
-            Experienced mentors dedicated to student progress and spoken English excellence.
+          <p className="mx-auto mt-1 max-w-2xl text-sm text-slate-700 sm:text-base">
+            Learn from experienced and passionate educators who are committed to your success.
           </p>
         </div>
 
@@ -201,39 +147,11 @@ export const AboutUs: React.FC<AboutUsProps> = ({
             {instructorAssetWarning && (
               <p role="status" className="mb-4 text-center text-xs text-amber-700">{instructorAssetWarning}</p>
             )}
-            <div
-              className="relative z-10 mx-auto flex max-w-lg items-stretch gap-x-4 px-10 pb-7 pt-12 lg:hidden"
-              onTouchStart={handleInstructorTouchStart}
-              onTouchEnd={handleInstructorTouchEnd}
-            >
-              <button
-                type="button"
-                onClick={goToPreviousInstructor}
-                disabled={visibleInstructorIndex === 0}
-                aria-label="Previous instructor"
-                className="absolute left-0 top-1/2 z-20 -translate-y-1/2 rounded-full border border-slate-200 bg-white p-2 text-[#0B1F4D] shadow-md transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                <ChevronLeft className="h-5 w-5" />
-              </button>
-              <div className="w-full">
-                {renderInstructorCard(publishedTeam[visibleInstructorIndex])}
-              </div>
-              <button
-                type="button"
-                onClick={goToNextInstructor}
-                disabled={visibleInstructorIndex >= publishedTeam.length - 1}
-                aria-label="Next instructor"
-                className="absolute right-0 top-1/2 z-20 -translate-y-1/2 rounded-full border border-slate-200 bg-white p-2 text-[#0B1F4D] shadow-md transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                <ChevronRight className="h-5 w-5" />
-              </button>
-              <p className="absolute bottom-0 left-1/2 -translate-x-1/2 text-xs font-medium tabular-nums text-slate-500">
-                {visibleInstructorIndex + 1} / {publishedTeam.length}
-              </p>
-            </div>
-            <div className="relative z-10 hidden grid-cols-1 items-stretch gap-x-8 gap-y-16 pt-12 lg:grid lg:grid-cols-3">
-              {publishedTeam.map((member) => (
-                renderInstructorCard(member)
+            <div className="relative z-10 flex flex-col items-stretch justify-center gap-4 md:flex-row md:flex-wrap">
+              {publishedTeam.map((member, index) => (
+                <div key={member.id} className="w-full md:w-[calc((100%-1rem)/2)] lg:w-[calc((100%-2rem)/3)]">
+                  <InstructorProfileCard member={member} accentIndex={index} />
+                </div>
               ))}
             </div>
           </>
@@ -247,6 +165,15 @@ export const AboutUs: React.FC<AboutUsProps> = ({
             </p>
           </div>
         )}
+        <svg
+          aria-hidden="true"
+          className="pointer-events-none absolute bottom-0 left-0 z-0 h-16 w-full sm:h-20"
+          viewBox="0 0 1200 100"
+          preserveAspectRatio="none"
+        >
+          <path d="M-20 8 C 170 62 370 95 610 79" fill="none" stroke="#FE8101" strokeWidth="13" />
+          <path d="M590 79 C 830 66 1010 43 1220 4" fill="none" stroke="#029522" strokeWidth="13" />
+        </svg>
       </section>
 
       {/* 3. Our Philosophy (Vision, Mission, Values) */}

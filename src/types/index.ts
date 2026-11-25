@@ -1,5 +1,6 @@
 import type { ApplicationQualificationCategory } from '../../application-request';
 import type { AudienceTag } from '../../audience-tags';
+import type { InstructorSkill } from './instructors';
 
 export { AUDIENCE_TAGS, isAudienceTag } from '../../audience-tags';
 export type { AudienceTag } from '../../audience-tags';
@@ -132,6 +133,7 @@ export interface TeamMember {
   full_name: string;
   designation: string;
   qualifications?: string | null;
+  teaching_skills?: InstructorSkill[] | null;
   bio: string;
   photo_url?: string | null;
   photo_object_key?: string | null;
