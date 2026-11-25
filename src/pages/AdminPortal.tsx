@@ -312,6 +312,8 @@ const [officialTermsLoading, setOfficialTermsLoading] = useState(true);
 const [officialTermsLoadError, setOfficialTermsLoadError] = useState<string | null>(null);
 const [officialDocumentSettingsLoading, setOfficialDocumentSettingsLoading] = useState(true);
 const [officialDocumentSettingsLoadError, setOfficialDocumentSettingsLoadError] = useState<string | null>(null);
+const [officialHeaderPhotoLoading, setOfficialHeaderPhotoLoading] = useState(false);
+const [officialHeaderPhotoSaving, setOfficialHeaderPhotoSaving] = useState(false);
 const [officialTermsPreviewOpen, setOfficialTermsPreviewOpen] = useState(false);
 const [officialPdfPreviewUrl, setOfficialPdfPreviewUrl] = useState<string | null>(null);
 const [officialPdfApplicationId, setOfficialPdfApplicationId] = useState('');
@@ -325,6 +327,9 @@ const [savedOfficialLogoConfigured, setSavedOfficialLogoConfigured] = useState(f
 const [officialGraphicConfigured, setOfficialGraphicConfigured] = useState(false);
 const [savedOfficialGraphicConfigured, setSavedOfficialGraphicConfigured] = useState(false);
 const officialLogoFileInputRef = useRef<HTMLInputElement>(null);
+const officialGraphicFileInputRef = useRef<HTMLInputElement>(null);
+const isOfficialHeaderPhotoDirty = Boolean(pendingOfficialGraphic) ||
+  savedOfficialGraphicConfigured !== officialGraphicConfigured;
 const mediaPreviewVideoId = mediaPreview?.media_type === 'video'
   ? extractYouTubeId(mediaPreview.youtube_url || mediaPreview.youtube_video_id)
   : null;
@@ -762,6 +767,35 @@ useEffect(() => {
   setPreview(URL.createObjectURL(await response.blob()));
 };
 
+const loadOfficialHeaderPhoto = async () => {
+  setOfficialHeaderPhotoLoading(true);
+  try {
+    const response = await fetchAdmin('/api/admin/official-document/assets?type=graphic', {
+      headers: getAuthHeaders(),
+    });
+    if (response.status === 404) {
+      setOfficialGraphicPreviewUrl(null);
+      setOfficialGraphicConfigured(false);
+      setSavedOfficialGraphicConfigured(false);
+      setPendingOfficialGraphic(null);
+      return;
+    }
+    if (!response.ok) {
+      const data = await response.json().catch(() => null);
+      throw new Error(data?.error || 'Unable to load the saved admission PDF header photo.');
+    }
+    setOfficialGraphicPreviewUrl(URL.createObjectURL(await response.blob()));
+    setOfficialGraphicConfigured(true);
+    setSavedOfficialGraphicConfigured(true);
+    setPendingOfficialGraphic(null);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unable to load the saved admission PDF header photo.';
+    setActionMessage({ type: 'error', text: message });
+  } finally {
+    setOfficialHeaderPhotoLoading(false);
+  }
+};
+
 const loadOfficialDocumentVersions = async (applicationId: string) => {
   if (!applicationId) {
     setOfficialDocumentVersions([]);
@@ -934,7 +968,10 @@ const saveOfficialDocumentSettings = async (): Promise<OfficialDocumentSettings>
   if (officialDocumentSettingsLoading || officialDocumentSettingsLoadError) {
     throw new Error('Load the current official document settings before saving changes.');
   }
+  const hasNewHeaderPhoto = Boolean(pendingOfficialGraphic);
+  const removesHeaderPhoto = savedOfficialGraphicConfigured && !officialGraphicConfigured;
   setLoading(true);
+  setOfficialHeaderPhotoSaving(hasNewHeaderPhoto || removesHeaderPhoto);
   try {
     const settingsToSave: Record<string, unknown> = { ...officialDocumentSettings };
     delete settingsToSave.logoObjectKey;
@@ -990,7 +1027,14 @@ const saveOfficialDocumentSettings = async (): Promise<OfficialDocumentSettings>
       });
       return settings;
     }
-    setActionMessage({ type: 'success', text: 'Official PDF settings saved successfully.' });
+    setActionMessage({
+      type: 'success',
+      text: hasNewHeaderPhoto
+        ? 'Official PDF settings and the header photo were saved. Newly generated admission PDFs will use the updated photo.'
+        : removesHeaderPhoto
+          ? 'Official PDF settings were saved and the header photo was removed. Newly generated admission PDFs will use the existing fallback.'
+          : 'Official PDF settings saved successfully.',
+    });
     return settings;
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unable to save official document settings.';
@@ -998,6 +1042,7 @@ const saveOfficialDocumentSettings = async (): Promise<OfficialDocumentSettings>
     throw error;
   } finally {
     setLoading(false);
+    setOfficialHeaderPhotoSaving(false);
   }
 };
 
@@ -1051,6 +1096,8 @@ const previewOfficialDocumentPdf = async (download = false) => {
         ...(!officialGraphicConfigured ? { graphicObjectKey: null } : {}),
         termsAndConditions: officialTerms,
       };
+    } else if (savedOfficialGraphicConfigured && !officialGraphicConfigured) {
+      previewPayload.settings = { graphicObjectKey: null };
     }
     if (pendingOfficialLogo) previewPayload.logo_file_base64 = pendingOfficialLogo;
     if (pendingOfficialGraphic) previewPayload.graphic_file_base64 = pendingOfficialGraphic;
@@ -1158,10 +1205,86 @@ const removeOfficialLogo = () => {
   setActionMessage({ type: 'success', text: 'Logo removal is staged. Save Changes to apply it to future PDFs.' });
 };
 
+const removeOfficialHeaderPhoto = () => {
+  if (!window.confirm('Remove the saved header photo from future admission PDFs? This does not change previously issued documents.')) return;
+  const hadSavedPhoto = savedOfficialGraphicConfigured;
+  setPendingOfficialGraphic(null);
+  setOfficialDocumentSettings((current) => ({ ...current, graphicObjectKey: null }));
+  setOfficialGraphicConfigured(false);
+  setOfficialGraphicPreviewUrl(null);
+  setActionMessage({
+    type: 'success',
+    text: hadSavedPhoto
+      ? 'Header photo removal is staged. Save changes to apply it to future admission PDFs.'
+      : 'The selected header photo was cleared.',
+  });
+};
+
+const cancelOfficialHeaderPhotoChanges = async () => {
+  setPendingOfficialGraphic(null);
+  setOfficialGraphicConfigured(savedOfficialGraphicConfigured);
+  try {
+    await loadOfficialAssetPreview('graphic', savedOfficialGraphicConfigured);
+    setActionMessage({ type: 'success', text: 'Unsaved header photo changes were cancelled.' });
+  } catch (error) {
+    setActionMessage({
+      type: 'error',
+      text: error instanceof Error ? error.message : 'Unable to restore the saved header photo preview.',
+    });
+  }
+};
+
+const saveOfficialHeaderPhoto = async () => {
+  if (officialHeaderPhotoSaving || !isOfficialHeaderPhotoDirty) return;
+  const hasNewPhoto = Boolean(pendingOfficialGraphic);
+  const removesSavedPhoto = savedOfficialGraphicConfigured && !officialGraphicConfigured;
+  setOfficialHeaderPhotoSaving(true);
+  try {
+    const payload: Record<string, unknown> = { settings: {} };
+    if (pendingOfficialGraphic) payload.graphic_file_base64 = pendingOfficialGraphic;
+    if (removesSavedPhoto) payload.remove_graphic = true;
+    const result = await requestJson('/api/admin/official-document', {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(payload),
+    });
+    if (typeof result.has_graphic !== 'boolean') {
+      throw new Error('The saved header photo status was not returned by the server.');
+    }
+    setOfficialGraphicConfigured(result.has_graphic);
+    setSavedOfficialGraphicConfigured(result.has_graphic);
+    setPendingOfficialGraphic(null);
+    const previewResults = await Promise.allSettled([
+      loadOfficialAssetPreview('graphic', result.has_graphic),
+    ]);
+    if (previewResults.some((preview) => preview.status === 'rejected')) {
+      setActionMessage({
+        type: 'error',
+        text: 'The header photo was saved, but its preview could not be reloaded.',
+      });
+      return;
+    }
+    setActionMessage({
+      type: 'success',
+      text: hasNewPhoto
+        ? 'Header photo uploaded and saved. Newly generated admission PDFs will use it.'
+        : 'Header photo removed. Newly generated admission PDFs will use the existing fallback.',
+    });
+  } catch (error) {
+    setActionMessage({
+      type: 'error',
+      text: error instanceof Error ? error.message : 'Unable to save the admission PDF header photo.',
+    });
+  } finally {
+    setOfficialHeaderPhotoSaving(false);
+  }
+};
+
   useEffect(() => {
     void fetchOfficialDocumentTerms();
     if (isSuperAdmin) void fetchOfficialDocumentSettings();
-  }, [isSuperAdmin]);
+    else if (isAdminOrHigher) void loadOfficialHeaderPhoto();
+  }, [isSuperAdmin, isAdminOrHigher]);
 
 
 
@@ -4226,7 +4349,7 @@ const res = await fetchAdmin(url, {
               <header className="rounded-2xl border border-orange-100 bg-gradient-to-r from-[#fff8ef] via-white to-[#EAF3FF] p-5 shadow-sm">
                 <p className="text-[10px] font-bold uppercase tracking-[.16em] text-orange-700">Official documents</p>
                 <h1 className="mt-1 text-xl font-extrabold text-[#123B78] sm:text-2xl">Settings & Official PDF Configuration</h1>
-                <p className="mt-2 text-xs leading-relaxed text-slate-600">Manage approved Terms & Conditions for future admission PDFs. Only Super Admin can change settings; previews use synthetic student data only.</p>
+                <p className="mt-2 text-xs leading-relaxed text-slate-600">Admins can manage the admission PDF header photo. Super Admins can also change document settings and approved Terms & Conditions; previews use synthetic student data only.</p>
               </header>
 
               {isSuperAdmin && officialDocumentSettingsLoadError && (
@@ -4234,6 +4357,87 @@ const res = await fetchAdmin(url, {
                   <span>{officialDocumentSettingsLoadError}</span>
                   <button type="button" onClick={() => void fetchOfficialDocumentSettings()} className="min-h-9 rounded-lg border border-rose-300 px-3 text-xs font-bold">Retry PDF settings</button>
                 </div>
+              )}
+
+              {isAdminOrHigher && (
+                <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5" aria-labelledby="official-header-photo-heading">
+                  <div>
+                    <h2 id="official-header-photo-heading" className="font-bold text-[#0B1F4D]">Admission PDF Header Photo</h2>
+                    <p className="mt-1 text-xs text-slate-500">Manage the existing photo displayed in the top-right of the admission PDF. Its position and layout remain unchanged.</p>
+                  </div>
+                  <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] sm:items-center">
+                    <div className="min-w-0">
+                      {officialHeaderPhotoLoading || (isSuperAdmin && officialDocumentSettingsLoading) ? (
+                        <p role="status" className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-center text-xs text-slate-600">Loading saved header photo...</p>
+                      ) : officialGraphicPreviewUrl ? (
+                        <img src={officialGraphicPreviewUrl} alt="Current admission PDF header photo preview" className="h-36 w-full rounded-lg border border-slate-200 bg-white p-2 object-contain" />
+                      ) : (
+                        <p className="rounded-lg border border-dashed border-slate-300 p-6 text-center text-xs text-slate-500">No header photo is configured. The existing PDF fallback will be used.</p>
+                      )}
+                    </div>
+                    <div className="space-y-3">
+                      <input
+                        ref={officialGraphicFileInputRef}
+                        type="file"
+                        accept="image/png,image/jpeg"
+                        onChange={(event) => handleOfficialAssetChange('graphic', event)}
+                        className="hidden"
+                        aria-label="Choose admission PDF header photo"
+                      />
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          disabled={officialHeaderPhotoSaving || officialHeaderPhotoLoading}
+                          onClick={() => officialGraphicFileInputRef.current?.click()}
+                          className="min-h-10 rounded-lg bg-[#123B78] px-3 text-xs font-bold text-white hover:bg-[#0B1F4D] disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {pendingOfficialGraphic || officialGraphicConfigured ? 'Change / Replace Photo' : 'Upload Header Photo'}
+                        </button>
+                        {(officialGraphicConfigured || pendingOfficialGraphic) && (
+                          <button
+                            type="button"
+                            disabled={officialHeaderPhotoSaving || officialHeaderPhotoLoading}
+                            onClick={removeOfficialHeaderPhoto}
+                            className="min-h-10 rounded-lg border border-rose-200 px-3 text-xs font-bold text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            Remove Photo
+                          </button>
+                        )}
+                      </div>
+                      <p className="text-[11px] leading-relaxed text-slate-500">PNG or JPEG, up to 3 MB. Changes apply only to newly generated admission PDFs.</p>
+                      {isOfficialHeaderPhotoDirty && !isSuperAdmin && (
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            disabled={officialHeaderPhotoSaving || officialHeaderPhotoLoading}
+                            onClick={() => void saveOfficialHeaderPhoto()}
+                            className="min-h-10 rounded-lg bg-orange-600 px-4 text-xs font-bold text-white hover:bg-orange-700 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            Save / Apply Photo
+                          </button>
+                          <button
+                            type="button"
+                            disabled={officialHeaderPhotoSaving || officialHeaderPhotoLoading}
+                            onClick={() => void cancelOfficialHeaderPhotoChanges()}
+                            className="min-h-10 rounded-lg border border-slate-300 px-3 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  {officialHeaderPhotoSaving && (
+                    <div role="status" aria-live="polite" className="space-y-2 rounded-lg border border-blue-100 bg-blue-50 p-3 text-xs font-semibold text-[#123B78]">
+                      <span>{pendingOfficialGraphic ? 'Uploading header photo to private storage and saving changes...' : 'Saving header photo changes...'}</span>
+                      {pendingOfficialGraphic && (
+                        <div role="progressbar" aria-label="Header photo upload progress" aria-valuetext="Upload in progress" className="h-1.5 overflow-hidden rounded-full bg-blue-100">
+                          <div className="h-full w-1/3 animate-pulse rounded-full bg-orange-500" />
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </section>
               )}
 
               {isAdminOrHigher && (
@@ -4346,13 +4550,6 @@ const res = await fetchAdmin(url, {
                         ? <img src={officialLogoPreviewUrl} alt="Official PDF academy logo preview" className="h-24 w-full rounded-lg border border-slate-200 bg-white p-2 object-contain" />
                         : <p className="rounded-lg border border-dashed border-slate-300 p-4 text-center text-xs text-slate-500">No academy logo is configured.</p>}
                     </div>
-                    <div className="space-y-3 rounded-xl border border-slate-100 p-3">
-                      <label className="block text-xs font-semibold text-slate-700">Footer building / decorative image (PNG/JPEG, up to 3 MB)
-                        <input type="file" accept="image/png,image/jpeg" onChange={(event) => handleOfficialAssetChange('graphic', event)} className="mt-2 block w-full text-xs" />
-                      </label>
-                      {officialGraphicPreviewUrl && <img src={officialGraphicPreviewUrl} alt="Official PDF footer image preview" className="h-24 w-full rounded-lg border border-slate-200 bg-white p-2 object-contain" />}
-                      <button type="button" onClick={() => { setPendingOfficialGraphic(null); setOfficialDocumentSettings((current) => ({ ...current, graphicObjectKey: null })); setOfficialGraphicConfigured(false); setOfficialGraphicPreviewUrl(null); }} className="text-xs font-semibold text-rose-700 underline">Remove graphic</button>
-                    </div>
                   </div>
                   <div className="rounded-xl border border-slate-200 bg-[#F4F7FC] p-3">
                     <p className="text-xs font-bold text-[#123B78]">Fixed official document palette</p>
@@ -4453,7 +4650,7 @@ const res = await fetchAdmin(url, {
                 <div className="sticky bottom-2 flex flex-wrap justify-end gap-2 rounded-2xl border border-slate-200 bg-white/95 p-3 shadow-lg backdrop-blur">
                   <button type="button" disabled={loading || officialDocumentSettingsLoading || Boolean(officialDocumentSettingsLoadError)} onClick={resetOfficialDocumentSettings} className="min-h-11 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50">Reset to Defaults</button>
                   <button type="button" disabled={loading || officialDocumentSettingsLoading || Boolean(officialDocumentSettingsLoadError)} onClick={cancelOfficialDocumentChanges} className="min-h-11 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50">Cancel</button>
-                  <button type="submit" disabled={loading || officialDocumentSettingsLoading || Boolean(officialDocumentSettingsLoadError)} className="min-h-11 rounded-xl bg-orange-600 px-5 py-2.5 text-xs font-bold text-white hover:bg-orange-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600 disabled:opacity-50">{loading ? 'Saving...' : 'Save Changes'}</button>
+                  <button type="submit" disabled={loading || officialDocumentSettingsLoading || Boolean(officialDocumentSettingsLoadError)} className="min-h-11 rounded-xl bg-orange-600 px-5 py-2.5 text-xs font-bold text-white hover:bg-orange-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600 disabled:opacity-50">{loading ? pendingOfficialGraphic ? 'Uploading header photo...' : 'Saving...' : 'Save Changes'}</button>
                 </div>
               </form>}
 

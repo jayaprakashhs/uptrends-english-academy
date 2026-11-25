@@ -620,17 +620,16 @@ export async function generateOfficialPdf({
   const academyX = margin + (logoImage ? 108 : 0);
   const academyMaxWidth = Math.max(150, pageWidth - margin - academyX - graphicWidth - (decorativeGraphic ? 12 : 0));
   if (logoImage) {
-    drawRoundedRect(
-      page,
-      margin,
-      pageHeight - 96,
-      98,
-      70,
-      7,
-      colors.white,
-      colors.line,
-      0.6,
-    );
+    page.drawSvgPath('M7 0 H91 Q98 0 98 7 V35 H0 V7 Q0 0 7 0 Z', {
+      x: margin,
+      y: pageHeight - 26,
+      color: colorFromHex('#FE8101'),
+    });
+    page.drawSvgPath('M0 0 H98 V28 Q98 35 91 35 H7 Q0 35 0 28 Z', {
+      x: margin,
+      y: pageHeight - 61,
+      color: colorFromHex('#029522'),
+    });
     const scale = Math.min(88 / logoImage.width, 60 / logoImage.height);
     const fittedWidth = logoImage.width * scale;
     const fittedHeight = logoImage.height * scale;
@@ -661,15 +660,6 @@ export async function generateOfficialPdf({
     maxWidth: academyMaxWidth,
   });
   if (decorativeGraphic) {
-    drawRoundedRect(
-      page,
-      graphicX,
-      pageHeight - 104,
-      graphicWidth,
-      graphicHeight,
-      12,
-      colors.lightBlue,
-    );
     const scale = Math.min((graphicWidth - 8) / decorativeGraphic.width, (graphicHeight - 8) / decorativeGraphic.height);
     const fittedWidth = decorativeGraphic.width * scale;
     const fittedHeight = decorativeGraphic.height * scale;

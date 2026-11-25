@@ -3623,7 +3623,7 @@ const saveOfficialDocumentSettings = async (
   request: Request,
   env: Env,
 ): Promise<Response> => {
-  const auth = await requireAdmin(request, env, 'super_admin');
+  const auth = await requireAdmin(request, env, 'admin');
   if (isResponse(auth)) return auth;
 
   const body = await parseJson(request);
@@ -3635,6 +3635,18 @@ const saveOfficialDocumentSettings = async (
   if ((body.remove_logo !== undefined && typeof body.remove_logo !== 'boolean') ||
     (body.remove_graphic !== undefined && typeof body.remove_graphic !== 'boolean')) {
     return errorResponse('Official document asset removal flags must be boolean.', 400);
+  }
+  if (auth.profile.role !== 'super_admin') {
+    const allowedFields = new Set(['settings', 'graphic_file_base64', 'remove_graphic']);
+    const hasGraphicUpload = body.graphic_file_base64 !== undefined;
+    const removesGraphic = body.remove_graphic === true;
+    if (
+      Object.keys(body).some((field) => !allowedFields.has(field)) ||
+      Object.keys(body.settings as Record<string, unknown>).length > 0 ||
+      hasGraphicUpload === removesGraphic
+    ) {
+      return errorResponse('Admins may only upload or remove the admission PDF header photo.', 403);
+    }
   }
   const { data: currentData, error: currentError } = await auth.supabase
     .from('official_document_settings')
@@ -3702,7 +3714,9 @@ const saveOfficialDocumentSettings = async (
     return validated;
   }
 
-  const settingsToPersist = { ...validated, termsAndConditions: undefined };
+  const settingsToPersist = auth.profile.role === 'super_admin'
+    ? { ...validated, termsAndConditions: undefined }
+    : { graphicObjectKey: validated.graphicObjectKey };
   const { data, error } = await auth.supabase.rpc('update_official_document_settings', {
     p_settings: settingsToPersist,
     p_updated_by: auth.profile.id,

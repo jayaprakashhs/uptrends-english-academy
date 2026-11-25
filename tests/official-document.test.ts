@@ -247,6 +247,20 @@ test('official PDF embeds the configured logo only when logo display is enabled'
   assert.match(Buffer.from(bytes).toString('latin1'), /\/Subtype\s*\/Image/);
 });
 
+test('official PDF logo container uses the academy orange and green while retaining the logo image', async () => {
+  const bytes = await generateOfficialPdf({
+    settings: DEFAULT_OFFICIAL_DOCUMENT_SETTINGS,
+    student,
+    course: selectedCourse,
+    assets: { logo: { bytes: pngBytes, mime: 'image/png' } },
+  });
+  const commands = decodePdfStreams(bytes);
+
+  assert.match(commands, /0\.996078431372549 0\.505882352941176[45] 0\.00392156862745098 rg/);
+  assert.match(commands, /0\.00784313725490196 0\.5843137254901961 0\.13333333333333333 rg/);
+  assert.match(Buffer.from(bytes).toString('latin1'), /\/Subtype\s*\/Image/);
+});
+
 test('official PDF prints only active terms in saved order and preserves paragraph breaks', async () => {
   const bytes = await generateOfficialPdf({
     settings: {
@@ -1252,6 +1266,127 @@ test('official PDF settings require super-admin and store uploaded assets privat
   assert.match(uploadedKeys[0], /^official-document-assets\/[0-9a-f-]+\.png$/i);
 });
 
+test('admins can replace or remove only the existing private admission PDF header photo', async () => {
+  const savedDocumentData: Record<string, unknown> = {
+    ...DEFAULT_OFFICIAL_DOCUMENT_SETTINGS,
+    graphicObjectKey: 'official-document-assets/eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee.png',
+  };
+  const persistedPayloads: Array<Record<string, unknown>> = [];
+  const uploadedKeys: string[] = [];
+  const assetReadKeys: string[] = [];
+  const env = makeWorkerEnv({
+    APPLICATION_MEDIA: {
+      put: async (key: string) => { uploadedKeys.push(key); },
+      delete: async () => undefined,
+      list: async () => ({ objects: [] }),
+      get: async (key: string) => {
+        assetReadKeys.push(key);
+        if (!uploadedKeys.includes(key)) return null;
+        return {
+          body: new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(pngBytes);
+              controller.close();
+            },
+          }),
+          httpMetadata: { contentType: 'image/png' },
+        };
+      },
+    },
+  });
+  const handleSettingsRequest = async (request: Request, url: URL) => {
+    if (url.pathname.endsWith('/official_document_settings') && request.method === 'GET') {
+      return Response.json([{ document_data: savedDocumentData }]);
+    }
+    if (url.pathname.endsWith('/rpc/update_official_document_settings')) {
+      const body = await request.json() as { p_settings: Record<string, unknown> };
+      persistedPayloads.push(body.p_settings);
+      Object.assign(savedDocumentData, body.p_settings);
+      return Response.json({ settings: savedDocumentData, updated_at: '2026-11-06T00:00:00Z' });
+    }
+    throw new Error(`Unexpected Supabase request: ${url.pathname}`);
+  };
+  const image = `data:image/png;base64,${Buffer.from(pngBytes).toString('base64')}`;
+
+  await withAdminFetch('admin', handleSettingsRequest, async () => {
+    const replaceResponse = await handleApiRequest(
+      authorizedRequest('/api/admin/official-document', 'PUT', {
+        settings: {},
+        graphic_file_base64: image,
+      }),
+      env,
+    );
+    assert.equal(replaceResponse.status, 200);
+    const replacement = await replaceResponse.json() as {
+      settings: Record<string, unknown>;
+      has_graphic: boolean;
+    };
+    assert.equal(replacement.has_graphic, true);
+    assert.equal(replacement.settings.graphicObjectKey, null);
+    assert.match(String(savedDocumentData.graphicObjectKey), /^official-document-assets\/[0-9a-f-]+\.png$/i);
+    assert.notEqual(savedDocumentData.graphicObjectKey, 'official-document-assets/eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee.png');
+    assert.deepEqual(persistedPayloads[0], { graphicObjectKey: savedDocumentData.graphicObjectKey });
+
+    const previewResponse = await handleApiRequest(
+      authorizedRequest('/api/admin/official-document/preview', 'POST', {}),
+      env,
+    );
+    assert.equal(previewResponse.status, 200);
+    assert.equal(previewResponse.headers.get('content-type'), 'application/pdf');
+    assert.ok((await previewResponse.arrayBuffer()).byteLength > 500);
+    assert.deepEqual(assetReadKeys, [savedDocumentData.graphicObjectKey]);
+
+    const removeResponse = await handleApiRequest(
+      authorizedRequest('/api/admin/official-document', 'PUT', {
+        settings: {},
+        remove_graphic: true,
+      }),
+      env,
+    );
+    assert.equal(removeResponse.status, 200);
+    assert.equal((await removeResponse.json() as { has_graphic: boolean }).has_graphic, false);
+    assert.equal(savedDocumentData.graphicObjectKey, null);
+    assert.deepEqual(persistedPayloads[1], { graphicObjectKey: null });
+    const fallbackPreviewResponse = await handleApiRequest(
+      authorizedRequest('/api/admin/official-document/preview', 'POST', {}),
+      env,
+    );
+    assert.equal(fallbackPreviewResponse.status, 200);
+    assert.equal(fallbackPreviewResponse.headers.get('content-type'), 'application/pdf');
+    assert.deepEqual(assetReadKeys, [persistedPayloads[0]?.graphicObjectKey]);
+  });
+  assert.equal(uploadedKeys.length, 1);
+  assert.notEqual(persistedPayloads[0]?.graphicObjectKey, persistedPayloads[1]?.graphicObjectKey);
+
+  for (const body of [
+    { settings: { heading: 'Admin must not change this' }, graphic_file_base64: image },
+    { settings: {}, logo_file_base64: image },
+  ]) {
+    await withAdminFetch('admin', async () => {
+      throw new Error('A forbidden header photo request must not reach Supabase.');
+    }, async () => {
+      const response = await handleApiRequest(
+        authorizedRequest('/api/admin/official-document', 'PUT', body),
+        env,
+      );
+      assert.equal(response.status, 403);
+    });
+  }
+
+  await withAdminFetch('staff', async () => {
+    throw new Error('An unauthorized header photo request must not reach Supabase.');
+  }, async () => {
+    const response = await handleApiRequest(
+      authorizedRequest('/api/admin/official-document', 'PUT', {
+        settings: {},
+        graphic_file_base64: image,
+      }),
+      env,
+    );
+    assert.equal(response.status, 403);
+  });
+});
+
 test('official document terms support super-admin edits and persistence while staff roles are read-only', async () => {
   const savedDocumentData: Record<string, unknown> = {
     ...DEFAULT_OFFICIAL_DOCUMENT_SETTINGS,
@@ -1655,7 +1790,11 @@ test('Admin Portal renders the role-gated Terms editor after PDF settings and lo
 
   const settingsNavigation = adminPortal.match(/\{ id: 'settings', label: 'Settings & PDF Config', icon: Settings, minRole: 'staff' \}/);
   assert.ok(settingsNavigation, 'Settings must remain reachable by Staff and higher roles');
-  assert.match(adminPortal, /void fetchOfficialDocumentTerms\(\);\s*if \(isSuperAdmin\) void fetchOfficialDocumentSettings\(\);/);
+  assert.match(adminPortal, /void fetchOfficialDocumentTerms\(\);\s*if \(isSuperAdmin\) void fetchOfficialDocumentSettings\(\);\s*else if \(isAdminOrHigher\) void loadOfficialHeaderPhoto\(\);/);
+  assert.match(adminPortal, /Admission PDF Header Photo/);
+  assert.match(adminPortal, /Change \/ Replace Photo/);
+  assert.match(adminPortal, /Save \/ Apply Photo/);
+  assert.match(adminPortal, /Uploading header photo to private storage/);
   assert.match(adminPortal, /readOnly={!isSuperAdmin}/);
   assert.match(adminPortal, /disabled={!isSuperAdmin}/);
   assert.match(adminPortal, /Add Condition/);
