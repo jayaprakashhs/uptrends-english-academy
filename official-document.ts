@@ -176,139 +176,6 @@ const colorFromHex = (value: string) => {
 const pageDimensions = (pageSize: OfficialPageSize): [number, number] =>
   pageSize === 'Letter' ? [612, 792] : [595.28, 841.89];
 
-const createBlurredLogoBackgroundPng = async (): Promise<Uint8Array> => {
-  const pixelRatio = 4;
-  const width = 98 * pixelRatio;
-  const height = 70 * pixelRatio;
-  const blurRadius = 24;
-  const blurMix = 0.4;
-  const sourceRed = new Float64Array(height);
-  const sourceGreen = new Float64Array(height);
-  const sourceBlue = new Float64Array(height);
-
-  for (let row = 0; row < height; row += 1) {
-    const transitionProgress = Math.max(
-      0,
-      Math.min(1, (row - (height / 2 - blurRadius)) / (blurRadius * 2)),
-    );
-    const transition = transitionProgress ** 2 * (3 - 2 * transitionProgress);
-    sourceRed[row] = 254 * (1 - transition) + 2 * transition;
-    sourceGreen[row] = 129 * (1 - transition) + 149 * transition;
-    sourceBlue[row] = 1 * (1 - transition) + 34 * transition;
-  }
-
-  const boxBlur = (values: Float64Array): Float64Array => {
-    const blurred = new Float64Array(values.length);
-    const windowSize = blurRadius * 2 + 1;
-    let sum = 0;
-    for (let offset = -blurRadius; offset <= blurRadius; offset += 1) {
-      sum += values[Math.max(0, Math.min(values.length - 1, offset))];
-    }
-    for (let index = 0; index < values.length; index += 1) {
-      blurred[index] = sum / windowSize;
-      const leaving = Math.max(0, index - blurRadius);
-      const entering = Math.min(values.length - 1, index + blurRadius + 1);
-      sum += values[entering] - values[leaving];
-    }
-    return blurred;
-  };
-  const gaussianApproximation = (channel: Float64Array): Float64Array => {
-    let blurred = channel;
-    for (let pass = 0; pass < 3; pass += 1) blurred = boxBlur(blurred);
-    return blurred;
-  };
-  const blurredRed = gaussianApproximation(sourceRed);
-  const blurredGreen = gaussianApproximation(sourceGreen);
-  const blurredBlue = gaussianApproximation(sourceBlue);
-  const rowLength = width * 4 + 1;
-  const pixelData = new Uint8Array(rowLength * height);
-  const cornerRadius = 7 * pixelRatio;
-
-  for (let row = 0; row < height; row += 1) {
-    const rowOffset = row * rowLength;
-    pixelData[rowOffset] = 0;
-    for (let column = 0; column < width; column += 1) {
-      const pixelX = column + 0.5;
-      const pixelY = row + 0.5;
-      const nearestX = Math.min(Math.max(pixelX, cornerRadius), width - cornerRadius);
-      const nearestY = Math.min(Math.max(pixelY, cornerRadius), height - cornerRadius);
-      const withinRoundedBounds =
-        (pixelX - nearestX) ** 2 + (pixelY - nearestY) ** 2 <= cornerRadius ** 2;
-      const pixelOffset = rowOffset + 1 + column * 4;
-      if (!withinRoundedBounds) {
-        pixelData[pixelOffset + 3] = 0;
-        continue;
-      }
-
-      pixelData[pixelOffset] = Math.round(sourceRed[row] * (1 - blurMix) + blurredRed[row] * blurMix);
-      pixelData[pixelOffset + 1] = Math.round(sourceGreen[row] * (1 - blurMix) + blurredGreen[row] * blurMix);
-      pixelData[pixelOffset + 2] = Math.round(sourceBlue[row] * (1 - blurMix) + blurredBlue[row] * blurMix);
-      pixelData[pixelOffset + 3] = 255;
-    }
-  }
-
-  const compression = new CompressionStream('deflate');
-  const writer = compression.writable.getWriter();
-  await writer.write(pixelData);
-  await writer.close();
-  const compressedPixels = new Uint8Array(await new Response(compression.readable).arrayBuffer());
-  const writeUInt32 = (target: Uint8Array, offset: number, value: number) => {
-    target[offset] = (value >>> 24) & 0xFF;
-    target[offset + 1] = (value >>> 16) & 0xFF;
-    target[offset + 2] = (value >>> 8) & 0xFF;
-    target[offset + 3] = value & 0xFF;
-  };
-  const crc32 = (bytes: Uint8Array) => {
-    let crc = 0xFFFFFFFF;
-    for (const byte of bytes) {
-      crc ^= byte;
-      for (let bit = 0; bit < 8; bit += 1) {
-        crc = (crc >>> 1) ^ ((crc & 1) ? 0xEDB88320 : 0);
-      }
-    }
-    return (crc ^ 0xFFFFFFFF) >>> 0;
-  };
-  const createChunk = (name: string, data: Uint8Array): Uint8Array => {
-    const type = new TextEncoder().encode(name);
-    const chunk = new Uint8Array(data.length + 12);
-    writeUInt32(chunk, 0, data.length);
-    chunk.set(type, 4);
-    chunk.set(data, 8);
-    writeUInt32(chunk, 8 + data.length, crc32(chunk.subarray(4, 8 + data.length)));
-    return chunk;
-  };
-  const header = new Uint8Array(13);
-  writeUInt32(header, 0, width);
-  writeUInt32(header, 4, height);
-  header[8] = 8;
-  header[9] = 6;
-  const chunks = [
-    Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]),
-    createChunk('IHDR', header),
-    createChunk('IDAT', compressedPixels),
-    createChunk('IEND', new Uint8Array()),
-  ];
-  const png = new Uint8Array(chunks.reduce((size, chunk) => size + chunk.length, 0));
-  let offset = 0;
-  for (const chunk of chunks) {
-    png.set(chunk, offset);
-    offset += chunk.length;
-  }
-  return png;
-};
-
-let blurredLogoBackgroundPng: Promise<Uint8Array> | null = null;
-
-const getBlurredLogoBackgroundPng = (): Promise<Uint8Array> => {
-  if (!blurredLogoBackgroundPng) {
-    blurredLogoBackgroundPng = createBlurredLogoBackgroundPng().catch((error: unknown) => {
-      blurredLogoBackgroundPng = null;
-      throw error;
-    });
-  }
-  return blurredLogoBackgroundPng;
-};
-
 export async function generateOfficialPdf({
   settings,
   student,
@@ -355,7 +222,6 @@ export async function generateOfficialPdf({
   let page!: PDFPage;
   let y: number;
   let logoImage: PDFImage | null = null;
-  let logoBackgroundImage: PDFImage | null = null;
   let studentPhoto: PDFImage | null = null;
   let decorativeGraphic: PDFImage | null = null;
 
@@ -363,7 +229,6 @@ export async function generateOfficialPdf({
     logoImage = assets.logo.mime === 'image/png'
       ? await pdf.embedPng(assets.logo.bytes)
       : await pdf.embedJpg(assets.logo.bytes);
-    logoBackgroundImage = await pdf.embedPng(await getBlurredLogoBackgroundPng());
   }
   if (assets?.studentPhoto && settings.layout.showStudentPhoto) {
     studentPhoto = assets.studentPhoto.mime === 'image/png'
@@ -757,13 +622,7 @@ export async function generateOfficialPdf({
   const academyX = margin + (logoImage ? 108 : 0);
   const academyMaxWidth = Math.max(150, pageWidth - margin - academyX - graphicWidth - (decorativeGraphic ? 12 : 0));
   const headerTextWidth = contentWidth - graphicWidth - (decorativeGraphic ? 12 : 0);
-  if (logoImage && logoBackgroundImage) {
-    page.drawImage(logoBackgroundImage, {
-      x: margin,
-      y: pageHeight - 96,
-      width: 98,
-      height: 70,
-    });
+  if (logoImage) {
     const scale = Math.min(88 / logoImage.width, 60 / logoImage.height);
     const fittedWidth = logoImage.width * scale;
     const fittedHeight = logoImage.height * scale;

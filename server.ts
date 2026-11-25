@@ -1463,7 +1463,7 @@ app.get('/api/faqs', async (req, res) => {
 });
 
 app.get('/api/admin/faqs', async (req, res) => {
-  const admin = await requireAdminAuth(req, res, 'super_admin');
+  const admin = await requireAdminAuth(req, res, 'admin');
   if (!admin) return;
   if (supabase) {
     const { data, error } = await supabase.from('faqs').select('*').order('display_order', { ascending: true });
@@ -2096,9 +2096,9 @@ app.delete('/api/admin/announcements/:id', async (req, res) => {
   return res.json({ success: true });
 });
 
-// FAQs Admin CRUD (Super Admin only)
+// FAQs Admin CRUD (Admin and Super Admin)
 app.post('/api/admin/faqs', async (req, res) => {
-  const admin = await requireAdminAuth(req, res, 'super_admin');
+  const admin = await requireAdminAuth(req, res, 'admin');
   if (!admin) return;
 
   const { question, answer, is_published } = req.body;
@@ -2121,7 +2121,7 @@ app.post('/api/admin/faqs', async (req, res) => {
 });
 
 app.put('/api/admin/faqs/:id', async (req, res) => {
-  const admin = await requireAdminAuth(req, res, 'super_admin');
+  const admin = await requireAdminAuth(req, res, 'admin');
   if (!admin) return;
 
   const { id } = req.params;
@@ -2140,7 +2140,7 @@ app.put('/api/admin/faqs/:id', async (req, res) => {
 });
 
 app.delete('/api/admin/faqs/:id', async (req, res) => {
-  const admin = await requireAdminAuth(req, res, 'super_admin');
+  const admin = await requireAdminAuth(req, res, 'admin');
   if (!admin) return;
 
   const { id } = req.params;

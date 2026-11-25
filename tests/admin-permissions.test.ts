@@ -20,6 +20,24 @@ test('FAQ management is available to Admin and Super Admin only', () => {
   assert.equal(canAccessAdminSection('super_admin', 'faqs'), true);
 });
 
+test('Express FAQ routes allow Admin and Super Admin', () => {
+  const server = readFileSync(new URL('../server.ts', import.meta.url), 'utf8');
+  const routes = [
+    "app.get('/api/admin/faqs'",
+    "app.post('/api/admin/faqs'",
+    "app.put('/api/admin/faqs/:id'",
+    "app.delete('/api/admin/faqs/:id'",
+  ];
+
+  for (const route of routes) {
+    const start = server.indexOf(route);
+    assert.notEqual(start, -1, `Missing Express route: ${route}`);
+    const nextRoute = server.indexOf('\napp.', start + route.length);
+    const routeSource = server.slice(start, nextRoute === -1 ? undefined : nextRoute);
+    assert.match(routeSource, /requireAdminAuth\(req, res, 'admin'\)/, route);
+  }
+});
+
 test('existing application, program, announcement, media, and callback section access is unchanged', () => {
   const staffSections: AdminSectionId[] = ['applications', 'callbacks', 'demo-class-requests', 'dashboard'];
   const adminSections: AdminSectionId[] = ['announcements', 'media', 'programs'];

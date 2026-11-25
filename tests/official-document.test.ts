@@ -277,7 +277,7 @@ test('official PDF embeds the configured logo only when logo display is enabled'
   assert.match(Buffer.from(bytes).toString('latin1'), /\/Subtype\s*\/Image/);
 });
 
-test('official PDF uses a blurred orange/green logo backdrop with the logo kept sharp', async () => {
+test('official PDF renders the logo without a backdrop and preserves its fit and position', async () => {
   const bytes = await generateOfficialPdf({
     settings: DEFAULT_OFFICIAL_DOCUMENT_SETTINGS,
     student,
@@ -288,9 +288,12 @@ test('official PDF uses a blurred orange/green logo backdrop with the logo kept 
   const imageObjects = pdf.context.enumerateIndirectObjects()
     .map(([, object]) => object.toString())
     .filter((object) => /\/Subtype\s*\/Image/.test(object));
+  const commands = decodePageStreams(pdf, 0);
 
-  assert.ok(imageObjects.some((object) => /\/Width\s+392\b/.test(object) && /\/Height\s+280\b/.test(object)));
-  assert.ok(imageObjects.some((object) => /\/Width\s+1\b/.test(object) && /\/Height\s+1\b/.test(object)));
+  assert.equal(imageObjects.length, 1);
+  assert.match(imageObjects[0], /\/Width\s+1\b/);
+  assert.match(imageObjects[0], /\/Height\s+1\b/);
+  assert.match(commands, /1 0 0 1 47 750\.89 cm[\s\S]*?60 0 0 60 0 0 cm[\s\S]*?\/Image-\d+ Do/);
 });
 
 test('official PDF header photo is 30 percent larger without overlapping header text', async () => {
