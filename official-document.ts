@@ -613,7 +613,7 @@ export async function generateOfficialPdf({
   };
 
   addPage(true);
-  const academyName = printable(settings.academyName);
+  const academyName = "Uptrend's English Academy";
   const graphicScale = 1.3;
   const graphicInset = 4 * graphicScale;
   const graphicWidth = decorativeGraphic ? 142 * graphicScale : 0;
@@ -621,6 +621,14 @@ export async function generateOfficialPdf({
   const graphicX = pageWidth - margin - graphicWidth;
   const academyX = margin + (logoImage ? 108 : 0);
   const academyMaxWidth = Math.max(150, pageWidth - margin - academyX - graphicWidth - (decorativeGraphic ? 12 : 0));
+  const academyNameFontSize = Math.min(
+    18,
+    18 * (academyMaxWidth - 1) / bold.widthOfTextAtSize(academyName, 18),
+  );
+  const academyNameY = pageHeight - 38;
+  const academyNameTop = academyNameY + bold.heightAtSize(academyNameFontSize, { descender: false });
+  // The configured academy logo has transparent padding above its visible artwork.
+  const logoArtworkTopPadding = 7.56;
   const headerTextWidth = contentWidth - graphicWidth - (decorativeGraphic ? 12 : 0);
   if (logoImage) {
     const scale = Math.min(88 / logoImage.width, 60 / logoImage.height);
@@ -628,25 +636,21 @@ export async function generateOfficialPdf({
     const fittedHeight = logoImage.height * scale;
     page.drawImage(logoImage, {
       x: margin + (98 - fittedWidth) / 2,
-      y: pageHeight - 90 + (58 - fittedHeight) / 2,
+      y: academyNameTop + logoArtworkTopPadding - fittedHeight,
       width: fittedWidth,
       height: fittedHeight,
     });
   }
-  const academyNameLines = wrapTextLines(academyName, bold, 18, academyMaxWidth);
-  academyNameLines.slice(0, 2).forEach((line, index) => {
-    page.drawText(line, {
-      x: academyX,
-      y: pageHeight - 38 - index * 18,
-      size: 18,
-      font: bold,
-      color: colors.navy,
-      maxWidth: academyMaxWidth,
-    });
+  page.drawText(academyName, {
+    x: academyX,
+    y: academyNameY,
+    size: academyNameFontSize,
+    font: bold,
+    color: colors.navy,
   });
   page.drawText(printable(settings.motivationalTagline), {
     x: academyX,
-    y: pageHeight - (academyNameLines.length > 1 ? 75 : 59),
+    y: pageHeight - 59,
     size: 8,
     font: bold,
     color: colors.orange,

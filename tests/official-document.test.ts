@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { inflateSync } from 'node:zlib';
-import { PDFDocument } from 'pdf-lib';
+import { PDFDocument, StandardFonts } from 'pdf-lib';
 import {
   DEFAULT_OFFICIAL_DOCUMENT_SETTINGS,
   mergeOfficialDocumentSettings,
@@ -81,11 +81,12 @@ const decodePageText = (pdf: PDFDocument, pageNumber: number): string =>
     .map((text) => Buffer.from(text[1], 'hex').toString('latin1'))
     .join('\n');
 
-const decodePageTextItems = (pdf: PDFDocument, pageNumber: number): Array<{ text: string; y: number }> =>
-  [...decodePageStreams(pdf, pageNumber).matchAll(/1 0 0 1 [-\d.]+ ([-\d.]+) Tm\s*<([0-9a-f]+)> Tj/gi)]
+const decodePageTextItems = (pdf: PDFDocument, pageNumber: number): Array<{ text: string; x: number; y: number }> =>
+  [...decodePageStreams(pdf, pageNumber).matchAll(/1 0 0 1 ([-\d.]+) ([-\d.]+) Tm\s*<([0-9a-f]+)> Tj/gi)]
     .map((match) => ({
-      text: Buffer.from(match[2], 'hex').toString('latin1'),
-      y: Number(match[1]),
+      text: Buffer.from(match[3], 'hex').toString('latin1'),
+      x: Number(match[1]),
+      y: Number(match[2]),
     }));
 
 const decodePdfTextItems = (bytes: Uint8Array): Array<{ text: string; y: number }> =>
@@ -277,7 +278,7 @@ test('official PDF embeds the configured logo only when logo display is enabled'
   assert.match(Buffer.from(bytes).toString('latin1'), /\/Subtype\s*\/Image/);
 });
 
-test('official PDF renders the logo without a backdrop and preserves its fit and position', async () => {
+test('official PDF renders the logo without a backdrop and aligns its padded artwork with the heading', async () => {
   const bytes = await generateOfficialPdf({
     settings: DEFAULT_OFFICIAL_DOCUMENT_SETTINGS,
     student,
@@ -289,11 +290,56 @@ test('official PDF renders the logo without a backdrop and preserves its fit and
     .map(([, object]) => object.toString())
     .filter((object) => /\/Subtype\s*\/Image/.test(object));
   const commands = decodePageStreams(pdf, 0);
+  const headingItems = decodePageTextItems(pdf, 0)
+    .filter((item) => item.text === "Uptrend's English Academy" && item.y > 700);
+  const metricsPdf = await PDFDocument.create();
+  const headingFont = await metricsPdf.embedFont(StandardFonts.HelveticaBold);
+  const headingTop = headingItems[0].y + headingFont.heightAtSize(18, { descender: false });
+  const logoPlacement = commands.match(/1 0 0 1 47 ([\d.]+) cm[\s\S]*?60 0 0 60 0 0 cm/);
 
   assert.equal(imageObjects.length, 1);
   assert.match(imageObjects[0], /\/Width\s+1\b/);
   assert.match(imageObjects[0], /\/Height\s+1\b/);
-  assert.match(commands, /1 0 0 1 47 750\.89 cm[\s\S]*?60 0 0 60 0 0 cm[\s\S]*?\/Image-\d+ Do/);
+  assert.deepEqual(headingItems, [{ text: "Uptrend's English Academy", x: 136, y: 803.89 }]);
+  assert.ok(logoPlacement);
+  assert.ok(Math.abs(Number(logoPlacement[1]) + 60 - headingTop - 7.56) < 0.001);
+  assert.match(commands, /1 0 0 1 47 [\d.]+ cm[\s\S]*?60 0 0 60 0 0 cm[\s\S]*?\/Image-\d+ Do/);
+});
+
+test('official PDF header keeps the exact academy name on one line beside the right-side graphic', async () => {
+  const bytes = await generateOfficialPdf({
+    settings: {
+      ...DEFAULT_OFFICIAL_DOCUMENT_SETTINGS,
+      academyName: 'A different configured academy name',
+      layout: {
+        ...DEFAULT_OFFICIAL_DOCUMENT_SETTINGS.layout,
+        showLogo: true,
+        showDecorations: true,
+      },
+    },
+    student,
+    course: selectedCourse,
+    assets: {
+      logo: { bytes: pngBytes, mime: 'image/png' },
+      graphic: { bytes: pngBytes, mime: 'image/png' },
+    },
+  });
+  const pdf = await PDFDocument.load(bytes);
+  const headingItems = decodePageTextItems(pdf, 0)
+    .filter((item) => item.text === "Uptrend's English Academy" && item.y > 700);
+  const commands = decodePageStreams(pdf, 0);
+  const headingHex = Buffer.from("Uptrend's English Academy", 'latin1').toString('hex').toUpperCase();
+  const headingIndex = commands.indexOf(`<${headingHex}> Tj`);
+  const headingTextBlock = commands.slice(commands.lastIndexOf('BT', headingIndex), headingIndex);
+  const fontSize = Number(headingTextBlock.match(/\/Helvetica-Bold-\d+ ([\d.]+) Tf/)?.[1]);
+  const metricsPdf = await PDFDocument.create();
+  const headingFont = await metricsPdf.embedFont(StandardFonts.HelveticaBold);
+  const headingRight = headingItems[0].x + headingFont.widthOfTextAtSize("Uptrend's English Academy", fontSize);
+  const graphicLeft = 595.28 - 28 - 142 * 1.3;
+
+  assert.deepEqual(headingItems, [{ text: "Uptrend's English Academy", x: 136, y: 803.89 }]);
+  assert.ok(fontSize > 0 && fontSize < 18);
+  assert.ok(headingRight <= graphicLeft - 12);
 });
 
 test('official PDF header photo is 30 percent larger without overlapping header text', async () => {
