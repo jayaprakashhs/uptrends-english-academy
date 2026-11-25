@@ -1,7 +1,7 @@
 import React from 'react';
 import { Logo } from './Logo';
 import { SocialIcons } from './Header';
-import { MapPin, Phone, Mail, Clock, ArrowUpRight } from 'lucide-react';
+import { MapPin, Phone, Mail, ArrowUpRight } from 'lucide-react';
 
 import { SiteBranding } from '../types';
 
@@ -187,29 +187,31 @@ export const Footer: React.FC<FooterProps> = ({
             </div>
           </div>
 
-          {/* Column 4: Regular Business Hours */}
+          {/* Column 4: Regular Hours */}
           <div>
             <h4 className="text-white text-sm font-bold uppercase tracking-wider mb-4 border-l-2 border-orange-500 pl-2">
               Regular Hours
             </h4>
-            <div className="bg-slate-900 p-4 rounded-xl border border-slate-800 text-xs space-y-2">
-              <div className="flex items-center gap-2 text-slate-300 font-semibold mb-2">
-                <Clock className="w-4 h-4 text-orange-400" />
-                <span>Academy Schedule</span>
+            <div className="rounded-xl border border-[#123B78]/50 bg-[#123B78]/15 p-3">
+              <div className="space-y-1">
+                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-1 border-b border-slate-700/70 py-2.5 text-xs sm:gap-2 lg:text-[11px] lg:tracking-tight">
+                  <span className="font-medium text-slate-300">Monday – Saturday</span>
+                  <span className="whitespace-nowrap text-right font-semibold text-[#FE8101]">
+                    8:00 AM – 8:30 PM
+                  </span>
+                </div>
+                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-1 py-2.5 text-xs sm:gap-2 lg:text-[11px] lg:tracking-tight">
+                  <span className="font-medium text-slate-300">Sunday</span>
+                  <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-right font-medium text-slate-200">
+                    <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-[#DC2626]" />
+                    Closed
+                  </span>
+                </div>
               </div>
-              <div className="flex justify-between py-1 border-b border-slate-800">
-                <span className="text-slate-400">Monday – Saturday</span>
-                <span className="text-white font-medium">8:00 AM – 8:30 PM</span>
-              </div>
-              <div className="flex justify-between py-1">
-                <span className="text-slate-400">Sunday</span>
-                <span className="text-rose-400 font-semibold">Closed</span>
-              </div>
-              <p className="text-[11px] text-slate-500 pt-2 italic">
-                *Supplied regular academy hours, subject to holiday schedules.
+              <p className="mt-2 border-t border-slate-700/50 pt-3 text-[11px] leading-relaxed text-slate-400">
+                Regular academy hours may vary on holidays.
               </p>
             </div>
-
           </div>
         </div>
 

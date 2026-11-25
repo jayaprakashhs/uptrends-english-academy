@@ -295,16 +295,16 @@ export const Home: React.FC<HomeProps> = ({
 
       {/* FEATURED PROGRAMS */}
       <section className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-        <div className="mb-10 flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
-          <div>
-            <div className="mb-2 inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-orange-600">
+        <div className="relative mb-10 flex flex-col items-center gap-4 text-center lg:block">
+          <div className="w-full text-center">
+            <div className="mb-2 inline-flex items-center justify-center gap-1.5 text-xs font-bold uppercase tracking-wider text-orange-600">
               <Compass className="h-4 w-4" />
               <span>Academy Offerings</span>
             </div>
-            <h2 id="featured-programs-heading" className="text-3xl font-extrabold tracking-tight text-slate-950">
+            <h2 id="featured-programs-heading" className="text-3xl font-extrabold tracking-tight text-slate-950 max-[639px]:whitespace-nowrap max-[639px]:text-[clamp(1.05rem,6.5vw,1.5rem)] max-[639px]:tracking-[-0.04em]">
               Featured English Programs
             </h2>
-            <p className="mt-1 max-w-xl text-sm text-slate-600">
+            <p className="mx-auto mt-1 max-w-xl text-sm text-slate-600">
               Structured courses designed to enhance everyday vocabulary,
               correct pronunciation, grammatical accuracy, and professional
               speaking.
@@ -317,7 +317,7 @@ export const Home: React.FC<HomeProps> = ({
               setCurrentPage('programs');
               window.scrollTo({ top: 0, behavior: 'smooth' });
             }}
-            className="inline-flex cursor-pointer items-center gap-1.5 text-sm font-bold text-orange-600 hover:text-orange-700"
+            className="inline-flex cursor-pointer items-center gap-1.5 text-sm font-bold text-orange-600 hover:text-orange-700 lg:absolute lg:bottom-0 lg:right-0"
           >
             View All Programs
             <ArrowRight className="h-4 w-4" />
@@ -537,27 +537,28 @@ export const Home: React.FC<HomeProps> = ({
       </section>
 
       {/* GOOGLE REVIEWS WIDGET */}
-      <section className="relative mx-auto w-full max-w-[1600px] px-4 py-2 sm:px-8 lg:px-20">
-        <div className="mx-auto max-w-7xl">
-          <div className="mb-8 text-center">
-            <div className="mb-2 inline-flex items-center justify-center gap-1.5 text-xs font-bold uppercase tracking-wider text-emerald-600">
-              <MessageSquareQuote className="h-4 w-4" />
-              <span>Google Reviews</span>
+      <div className="-mt-20 !mb-0 bg-[#F8F5EF] py-20">
+        <section className="relative mx-auto w-full max-w-[1600px] bg-[#F8F5EF] px-4 py-2 sm:px-8 lg:px-20">
+          <div className="mx-auto max-w-7xl">
+            <div className="mb-8 text-center">
+              <div className="mb-2 inline-flex items-center justify-center gap-1.5 text-xs font-bold uppercase tracking-wider text-emerald-600">
+                <MessageSquareQuote className="h-4 w-4" />
+                <span>Google Reviews</span>
+              </div>
+              <h2 className="text-2xl font-extrabold text-slate-950 sm:text-3xl">
+                What Our Students Say on Google
+              </h2>
+              <p className="mt-2 text-sm text-slate-600">
+                Read reviews shared on our Google Business Profile.
+              </p>
             </div>
-            <h2 className="text-2xl font-extrabold text-slate-950 sm:text-3xl">
-              What Our Customers Say on Google
-            </h2>
-            <p className="mt-2 text-sm text-slate-600">
-              Read reviews shared on our Google Business Profile.
-            </p>
-          </div>
 
-          <div className="min-w-0 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-5">
-            <SociableKitGoogleReviews />
+            <div className="min-w-0 rounded-2xl border border-slate-200 bg-[#F8F5EF] p-3 shadow-sm sm:p-5">
+              <SociableKitGoogleReviews />
+            </div>
           </div>
-
-        </div>
-      </section>
+        </section>
+      </div>
 
       {/* GOOGLE REVIEWS LINKS */}
       <section className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8">
@@ -607,8 +608,8 @@ export const Home: React.FC<HomeProps> = ({
         dataStatuses.media.loading ||
         dataStatuses.media.error) && (
         <section className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="mb-8 flex items-center justify-between gap-4">
-            <div>
+          <div className="relative mb-8 flex flex-col items-center gap-3 sm:block">
+            <div className="w-full text-center">
               <span className="text-xs font-bold uppercase tracking-wider text-orange-600">
                 Academy Highlights
               </span>
@@ -622,7 +623,7 @@ export const Home: React.FC<HomeProps> = ({
                 setCurrentPage('media');
                 window.scrollTo({ top: 0, behavior: 'smooth' });
               }}
-              className="flex cursor-pointer items-center gap-1 text-xs font-bold text-orange-600 hover:text-orange-700"
+              className="flex cursor-pointer items-center gap-1 self-end text-xs font-bold text-orange-600 hover:text-orange-700 sm:absolute sm:right-0 sm:top-1/2 sm:-translate-y-1/2"
             >
               Explore Gallery
               <ArrowRight className="h-3.5 w-3.5" />

@@ -109,14 +109,14 @@ export const AboutUs: React.FC<AboutUsProps> = ({
     <div className="space-y-16 py-12">
       {/* 1. Header Banner & About the Academy */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="text-center max-w-3xl mx-auto space-y-4">
+        <div className="text-center max-w-3xl mx-auto space-y-4 xl:max-w-6xl">
           <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-orange-100 text-orange-800 text-xs font-bold uppercase tracking-wider">
             <span>About Uptrend’s English Academy</span>
           </div>
-          <h1 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold text-slate-950 tracking-tight">
+          <h1 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold text-slate-950 tracking-tight xl:whitespace-nowrap">
             Building English Communication in Davangere
           </h1>
-          <p className="text-base sm:text-lg text-slate-600 leading-relaxed">
+          <p className="mx-auto max-w-3xl text-base sm:text-lg text-slate-600 leading-relaxed">
             Uptrend’s English Academy was established to help people in Davangere overcome linguistic hesitation, build natural conversational fluency, and speak English with confidence and poise.
           </p>
         </div>
