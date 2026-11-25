@@ -58,6 +58,36 @@ const decodePdfText = (bytes: Uint8Array): string =>
     .map((text) => Buffer.from(text[1], 'hex').toString('latin1'))
     .join('\n');
 
+const decodePageStreams = (pdf: PDFDocument, pageNumber: number): string => {
+  const contents = pdf.getPages()[pageNumber]?.node.Contents();
+  if (!contents) return '';
+  const streamObjects = 'size' in contents && typeof contents.size === 'function' &&
+    'get' in contents && typeof contents.get === 'function'
+    ? Array.from({ length: contents.size() }, (_, index) => contents.get(index))
+    : [contents];
+  return streamObjects.map((streamObject) => {
+    const stream = pdf.context.lookup(streamObject);
+    if (!stream || !('getContents' in stream) || typeof stream.getContents !== 'function') return '';
+    try {
+      return inflateSync(Buffer.from(stream.getContents())).toString('latin1');
+    } catch {
+      return '';
+    }
+  }).join('\n');
+};
+
+const decodePageText = (pdf: PDFDocument, pageNumber: number): string =>
+  [...decodePageStreams(pdf, pageNumber).matchAll(/<([0-9a-f]+)> Tj/gi)]
+    .map((text) => Buffer.from(text[1], 'hex').toString('latin1'))
+    .join('\n');
+
+const decodePageTextItems = (pdf: PDFDocument, pageNumber: number): Array<{ text: string; y: number }> =>
+  [...decodePageStreams(pdf, pageNumber).matchAll(/1 0 0 1 [-\d.]+ ([-\d.]+) Tm\s*<([0-9a-f]+)> Tj/gi)]
+    .map((match) => ({
+      text: Buffer.from(match[2], 'hex').toString('latin1'),
+      y: Number(match[1]),
+    }));
+
 const decodePdfTextItems = (bytes: Uint8Array): Array<{ text: string; y: number }> =>
   [...decodePdfStreams(bytes).matchAll(/1 0 0 1 [-\d.]+ ([-\d.]+) Tm\s*<([0-9a-f]+)> Tj/gi)]
     .map((match) => ({
@@ -247,18 +277,39 @@ test('official PDF embeds the configured logo only when logo display is enabled'
   assert.match(Buffer.from(bytes).toString('latin1'), /\/Subtype\s*\/Image/);
 });
 
-test('official PDF logo container uses the academy orange and green while retaining the logo image', async () => {
+test('official PDF uses a blurred orange/green logo backdrop with the logo kept sharp', async () => {
   const bytes = await generateOfficialPdf({
     settings: DEFAULT_OFFICIAL_DOCUMENT_SETTINGS,
     student,
     course: selectedCourse,
     assets: { logo: { bytes: pngBytes, mime: 'image/png' } },
   });
-  const commands = decodePdfStreams(bytes);
+  const pdf = await PDFDocument.load(bytes);
+  const imageObjects = pdf.context.enumerateIndirectObjects()
+    .map(([, object]) => object.toString())
+    .filter((object) => /\/Subtype\s*\/Image/.test(object));
 
-  assert.match(commands, /0\.996078431372549 0\.505882352941176[45] 0\.00392156862745098 rg/);
-  assert.match(commands, /0\.00784313725490196 0\.5843137254901961 0\.13333333333333333 rg/);
-  assert.match(Buffer.from(bytes).toString('latin1'), /\/Subtype\s*\/Image/);
+  assert.ok(imageObjects.some((object) => /\/Width\s+392\b/.test(object) && /\/Height\s+280\b/.test(object)));
+  assert.ok(imageObjects.some((object) => /\/Width\s+1\b/.test(object) && /\/Height\s+1\b/.test(object)));
+});
+
+test('official PDF header photo is 30 percent larger without overlapping header text', async () => {
+  const bytes = await generateOfficialPdf({
+    settings: DEFAULT_OFFICIAL_DOCUMENT_SETTINGS,
+    student,
+    course: selectedCourse,
+    assets: { graphic: { bytes: pngBytes, mime: 'image/png' } },
+  });
+  const pdf = await PDFDocument.load(bytes);
+  const commands = decodePageStreams(pdf, 0);
+  const photoScaleIndex = commands.indexOf('91 0 0 91 0 0 cm');
+  const translations = [...commands.slice(0, photoScaleIndex).matchAll(/1 0 0 1 ([\d.]+) ([\d.]+) cm/g)];
+  const placement = translations.reverse().find((match) =>
+    Number(match[1]) > 360 && Number(match[2]) > 700,
+  );
+
+  assert.notEqual(photoScaleIndex, -1, 'Expected the header image to use the 91-point 1.3x fit height.');
+  assert.ok(placement, 'Expected the image to remain to the right of header text.');
 });
 
 test('official PDF prints only active terms in saved order and preserves paragraph breaks', async () => {
@@ -293,6 +344,20 @@ test('official PDF prints only active terms in saved order and preserves paragra
     course: selectedCourse,
   });
   const text = decodePdfText(bytes);
+  const pdf = await PDFDocument.load(bytes);
+  const pageOneText = decodePageText(pdf, 0);
+  const pageTwoText = decodePageText(pdf, 1);
+  const termsHeading = decodePageTextItems(pdf, 1)
+    .find((item) => item.text.includes('TERMS & CONDITIONS'));
+
+  assert.equal(pdf.getPageCount(), 2);
+  assert.match(pageOneText, /A NOTE FROM THE ACADEMY/);
+  assert.match(pageOneText, /consistent learning, and active participation/);
+  assert.match(pageOneText, /Attend regularly, ask questions/);
+  assert.match(pageOneText, /real-life situations and keep learning/);
+  assert.doesNotMatch(pageOneText, /TERMS & CONDITIONS|First approved clause|Second approved clause/);
+  assert.match(pageTwoText, /TERMS & CONDITIONS/);
+  assert.ok(termsHeading && termsHeading.y > 700, 'Expected the Terms heading near the top of page 2.');
   assert.match(text, /TERMS & CONDITIONS/);
   assert.ok(text.indexOf('First approved clause') < text.indexOf('Second approved clause'));
   assert.match(text, /First paragraph/);
@@ -324,6 +389,8 @@ test('long official terms continue across pages without reaching the footer', as
   const pdf = await PDFDocument.load(bytes);
   const text = decodePdfText(bytes);
   const items = decodePdfTextItems(bytes);
+  assert.doesNotMatch(decodePageText(pdf, 0), /TERMS & CONDITIONS/);
+  assert.match(decodePageText(pdf, 1), /TERMS & CONDITIONS/);
   const marker = items.find((item) => item.text.includes(finalMarker));
   assert.ok(pdf.getPageCount() > 1);
   assert.match(text, /Approved clause sentence 1/);
@@ -415,7 +482,7 @@ test('official PDF preview uses synthetic data without reading student records o
       list: async () => ({ objects: [] }),
     },
   });
-  await withAdminFetch('admin', async (request, url) => {
+  await withAdminFetch('super_admin', async (request, url) => {
     if (url.pathname.endsWith('/official_document_settings')) return Response.json([]);
     if (url.pathname.endsWith('/applications') || url.pathname.includes('/rpc/')) unexpectedStudentQuery = true;
     throw new Error(`Unexpected Supabase request: ${url.pathname}`);
@@ -462,7 +529,7 @@ test('official PDF preview loads the latest saved terms and settings without que
       isActive: true,
     }],
   };
-  await withAdminFetch('admin', async (_request, url) => {
+  await withAdminFetch('super_admin', async (_request, url) => {
     if (url.pathname.endsWith('/official_document_settings')) {
       return Response.json([{ document_data: savedSettings }]);
     }
@@ -1325,7 +1392,8 @@ test('only super admins can replace or remove the private admission PDF header p
     assert.equal(replacement.settings.graphicObjectKey, null);
     assert.match(String(savedDocumentData.graphicObjectKey), /^official-document-assets\/[0-9a-f-]+\.png$/i);
     assert.notEqual(savedDocumentData.graphicObjectKey, 'official-document-assets/eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee.png');
-    assert.deepEqual(persistedPayloads[0], { graphicObjectKey: savedDocumentData.graphicObjectKey });
+    assert.equal(persistedPayloads[0]?.graphicObjectKey, savedDocumentData.graphicObjectKey);
+    assert.equal('termsAndConditions' in persistedPayloads[0]!, false);
 
     const previewResponse = await handleApiRequest(
       authorizedRequest('/api/admin/official-document/preview', 'POST', {}),
@@ -1346,7 +1414,8 @@ test('only super admins can replace or remove the private admission PDF header p
     assert.equal(removeResponse.status, 200);
     assert.equal((await removeResponse.json() as { has_graphic: boolean }).has_graphic, false);
     assert.equal(savedDocumentData.graphicObjectKey, null);
-    assert.deepEqual(persistedPayloads[1], { graphicObjectKey: null });
+    assert.equal(persistedPayloads[1]?.graphicObjectKey, null);
+    assert.equal('termsAndConditions' in persistedPayloads[1]!, false);
     const fallbackPreviewResponse = await handleApiRequest(
       authorizedRequest('/api/admin/official-document/preview', 'POST', {}),
       env,
@@ -1387,7 +1456,7 @@ test('only super admins can replace or remove the private admission PDF header p
   });
 });
 
-test('official document terms support super-admin edits and persistence while staff roles are read-only', async () => {
+test('official document terms are visible and editable only to Super Admin', async () => {
   const savedDocumentData: Record<string, unknown> = {
     ...DEFAULT_OFFICIAL_DOCUMENT_SETTINGS,
     logoObjectKey: 'official-document-assets/eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee.png',
@@ -1431,8 +1500,7 @@ test('official document terms support super-admin edits and persistence while st
         authorizedRequest('/api/admin/official-document/terms'),
         env,
       );
-      assert.equal(readResponse.status, 200);
-      assert.deepEqual((await readResponse.json() as { termsAndConditions: unknown }).termsAndConditions, []);
+      assert.equal(readResponse.status, 403);
 
       const deniedResponse = await handleApiRequest(
         authorizedRequest('/api/admin/official-document/terms', 'PUT', {
