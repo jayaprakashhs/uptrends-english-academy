@@ -83,7 +83,7 @@ VITE_SITE_URL="https://your-domain.com"
 # Supabase
 VITE_SUPABASE_URL="https://your-project.supabase.co"
 VITE_SUPABASE_ANON_KEY="eyJhbGciOiJIUzI1..."
-SUPABASE_SERVICE_ROLE_KEY="eyJhbGciOiJIUzI1..."
+SUPABASE_SERVICE_ROLE_KEY="<new Supabase sb_secret_... key>"
 
 # Cloudflare R2
 CLOUDFLARE_R2_ACCOUNT_ID="your_account_id"
@@ -123,17 +123,19 @@ npm run start
 
 ## 8. Cloudflare Worker API Migration & Safe Testing
 
-The Cloudflare Worker API is implemented in `worker-api.ts`; `worker.ts` handles API dispatch and static assets. For local Worker testing, put Worker runtime values below in an untracked `.dev.vars` file. `npm run dev` starts the Express server with Vite middleware, and `vite.config.ts` reads only `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` from `.dev.vars` as a fallback for the browser bundle. It never defines service-role or other secret values for frontend code. The Cloudflare Vite plugin may stage Worker bindings in its generated output for local preview; the build removes that generated `.dev.vars` file after bundling. The local Express server itself loads server credentials from `.env`. Cloudflare Worker settings are runtime-only and do not populate the browser bundle. Never put `SUPABASE_SERVICE_ROLE_KEY`, R2 credentials, or Resend credentials in any `VITE_*` variable, and do not commit local env files or log secret values.
+The Cloudflare Worker API is implemented in `worker-api.ts`; `worker.ts` handles API dispatch and static assets. For local development, put Worker runtime values in the untracked root `.dev.vars` file. Both the local Express server and Wrangler local runtime read `RESEND_API_KEY` from this file; `server.ts` also loads `.env`. The Vite client configuration reads only `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` from `.dev.vars` as fallbacks for public browser configuration. It never defines service-role or other secret values for frontend code. The Cloudflare Vite plugin may stage Worker bindings in its generated output for local preview; the build removes that generated `.dev.vars` file after bundling. Never put `SUPABASE_SERVICE_ROLE_KEY`, R2 credentials, or Resend credentials in any `VITE_*` variable, and do not commit local env files or log secret values.
 
 ```env
 SUPABASE_URL="https://your-project.supabase.co"
 VITE_SUPABASE_ANON_KEY="your-anon-key"
-SUPABASE_SERVICE_ROLE_KEY="your-service-role-key"
+SUPABASE_SERVICE_ROLE_KEY="<new Supabase sb_secret_... key>"
 CLOUDFLARE_R2_PUBLIC_URL="https://media.example.com"
-RESEND_API_KEY="your-resend-key"
+RESEND_API_KEY=re_your_actual_api_key
 RESEND_FROM_EMAIL="admissions@example.com"
 APPLICATION_NOTIFICATION_EMAIL="test-inbox@example.com"
 ```
+
+`RESEND_API_KEY` is the exact server-side binding name used for sending and health checks. Add the real Resend key only to `.dev.vars` locally; do not put it in a `VITE_*` variable or client build configuration.
 
 Start Wrangler locally with `npx wrangler dev --local --port 8787`. First verify non-mutating requests: public GET endpoints return JSON arrays/objects from Supabase, `GET /api/apply` returns `405` with `Allow: POST`, and an admin GET without a bearer token returns `401` when server credentials are configured. With no credentials, database-dependent endpoints should return JSON `503`, not sample data.
 
@@ -148,7 +150,7 @@ The Worker runtime bindings are declared in the root `wrangler.json` and are the
 
 Keep the application-photo bucket private. Only the public gallery bucket should be served through the public URL. `CLOUDFLARE_R2_PUBLIC_URL` is a text variable for the public gallery bucket and is not used to construct public application-photo URLs.
 
-For the Cloudflare Worker Production environment, add text variables and secrets in **Cloudflare Dashboard → Workers & Pages → `uptrend-english-academy` → Settings → Variables and Secrets → Production**. This must be the same Worker named by the root `wrangler.json`. Use these exact names and types:
+For the Cloudflare Worker Production environment, add text variables and secrets in **Cloudflare Dashboard → Workers & Pages → `uptrends-english-academy` → Settings → Variables and Secrets → Production**. This must be the same Worker named by the root `wrangler.json`. Use these exact names and types:
 
 | Binding | Cloudflare type | Required by |
 | --- | --- | --- |
@@ -159,6 +161,14 @@ For the Cloudflare Worker Production environment, add text variables and secrets
 | `RESEND_API_KEY` | Secret | Resend email sending and health check |
 | `RESEND_FROM_EMAIL` | Text variable (optional; code has a default sender) | Resend email sender |
 | `CLOUDFLARE_R2_PUBLIC_URL` | Text variable (HTTPS URL) | Required for serving public gallery uploads |
+
+If `RESEND_API_KEY` is missing or needs replacement, configure it as an encrypted Production secret without changing other bindings:
+
+```powershell
+npx wrangler secret put RESEND_API_KEY --config wrangler.json
+```
+
+Wrangler prompts for the value; enter the key there rather than putting it in a command, shell history, or config file. The health endpoint performs a read-only `GET /domains` request: `missing_configuration` means the binding is absent/blank, while `authentication_failed` means Resend rejected the configured key. Verify Production at `/api/system-status` after configuring it; a successful command alone does not prove that the correct Worker/environment is being served.
 
 The Worker uses native R2 bindings and does not require R2 API tokens, account ID, or S3 access credentials. The local Express server remains a separate S3-compatible R2 client and continues to read its credential variables from `.env`. `ASSETS` is a separate static-assets binding generated from `wrangler.json`.
 
@@ -172,7 +182,9 @@ For production `503` responses from Supabase-backed Worker routes, verify the bi
 
 Public routes fail closed with JSON `503` if the URL or public key is missing or the Supabase client cannot be initialized. Admin routes fail closed with JSON `503` if the URL or service-role key is missing or the client cannot be initialized. The Worker emits safe `api_diagnostic` log entries with an operation, error category, and (for missing configuration) binding name only. It never logs binding values. After changing Production bindings, deploy the Worker and verify `/api/system-status`, `/api/programs`, and an admin API request with a valid admin session. Do not treat a successful Worker deployment as proof that runtime bindings are present.
 
-The source Worker entry is `worker.ts`. Root `wrangler.json` is the Vite plugin's source configuration: its Worker name must match the intended production Worker, and `keep_vars: true` preserves dashboard-configured text variables when Wrangler deploys without declaring them in the config. Vite builds the deployable bundle and generates `dist/uptrends_english_academy/wrangler.json`, whose `main` is the compiled Worker and whose assets directory points at `dist/client`. After review and configuration, `npm run deploy` builds first and deploys using that generated config. Do not deploy using the root `wrangler.json` directly; it is not the final bundle/assets layout. If using Cloudflare's Git integration, verify its build command runs the same production build/deploy process against this generated config and that its target is `uptrend-english-academy` Production, not a Preview environment or another Worker.
+The source Worker entry is `worker.ts`. Root `wrangler.json` is the Vite plugin's source configuration: its Worker name is `uptrends-english-academy`, and `keep_vars: true` preserves dashboard-configured text variables when Wrangler deploys without declaring them in the config. Vite builds the deployable bundle and generates `dist/uptrends_english_academy/wrangler.json`, whose `main` is the compiled Worker and whose assets directory points at `dist/client`. After review and configuration, `npm run deploy` builds first and deploys using that generated config. Do not deploy using the root `wrangler.json` directly; it is not the final bundle/assets layout. If using Cloudflare's Git integration, verify its build command runs the same production build/deploy process against this generated config and that its target is `uptrends-english-academy` Production, not a Preview environment or another Worker.
+
+The backend reads `SUPABASE_SERVICE_ROLE_KEY` in `server.ts` (local Express) and `worker-api.ts` (Worker API, with the binding declared in `worker.ts`). The current Supabase client accepts the key as a string, so a supported `sb_secret_...` key can replace the legacy service-role JWT under the same environment variable name; no database policy or schema change is needed. Rotate safely: create the new Supabase secret key, configure it in local `.dev.vars`/`.env` and as the Production Worker secret (`npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY --config wrangler.json`), then verify the Supabase health check and representative admin operations in each environment. Keep the old key active until all dependent services have passed verification; only then revoke it in Supabase. Never paste either key into chat, source code, or build-time `VITE_*` variables.
 
 Use a staging Supabase project, a dedicated test R2 bucket, and a Resend test/verified recipient for mutation checks. Submit one test application and callback; verify their database records and notification/email outcomes. For gallery testing, create a small JPEG/PNG/WebP photo, verify its `media_items.r2_object_key` and `media_url`, then delete it and verify both the row and R2 object are removed. Also create/edit a YouTube entry with a valid URL and reject an invalid URL. These actions create records, upload files, and can send email; do not run them against production as smoke tests.
 

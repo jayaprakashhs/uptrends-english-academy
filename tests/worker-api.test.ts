@@ -1165,6 +1165,69 @@ test('system status recognizes all documented runtime bindings as configured', a
   }
 });
 
+test('Resend health reports authentication failures without exposing the key or sending email', async () => {
+  const apiKey = 'test-resend-api-key';
+  const originalFetch = globalThis.fetch;
+  const requests: Array<{ url: string; method: string; authorization: string | null }> = [];
+  globalThis.fetch = async (input, init) => {
+    const request = input instanceof Request ? input : new Request(input, init);
+    requests.push({
+      url: request.url,
+      method: request.method,
+      authorization: request.headers.get('authorization'),
+    });
+    return new Response('Unauthorized', { status: 401 });
+  };
+
+  try {
+    const response = await worker.fetch(requestFor('/api/system-status'), {
+      RESEND_API_KEY: apiKey,
+    });
+    const body = await response.text();
+    const status = JSON.parse(body) as {
+      resend: { configured: boolean; connected: boolean; error_category: string | null };
+    };
+
+    assert.deepEqual(status.resend, {
+      configured: true,
+      connected: false,
+      error_category: 'authentication_failed',
+    });
+    assert.ok(!body.includes(apiKey));
+    assert.deepEqual(requests, [{
+      url: 'https://api.resend.com/domains',
+      method: 'GET',
+      authorization: `Bearer ${apiKey}`,
+    }]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('Resend health treats a blank API key as missing configuration', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    throw new Error('Resend must not be queried without a configured key.');
+  };
+
+  try {
+    const response = await worker.fetch(requestFor('/api/system-status'), {
+      RESEND_API_KEY: '  ',
+    });
+    const body = await response.json() as {
+      resend: { configured: boolean; connected: boolean; error_category: string | null };
+    };
+
+    assert.deepEqual(body.resend, {
+      configured: false,
+      connected: false,
+      error_category: 'missing_configuration',
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('public Supabase-backed routes return JSON 503 when public bindings are missing', async () => {
   const routes = ['/api/programs', '/api/media', '/api/branding', '/api/faqs', '/api/announcements'];
   await withCapturedLogs(async () => {

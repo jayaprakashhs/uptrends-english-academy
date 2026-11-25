@@ -42,7 +42,7 @@ app.use(express.urlencoded({ extended: true, limit: '16mb' }));
 // -------------------------------------------------------------
 const SUPABASE_URL = process.env.VITE_SUPABASE_URL || '';
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
+const RESEND_API_KEY = process.env.RESEND_API_KEY?.trim() || '';
 const RESEND_FROM_EMAIL = process.env.RESEND_FROM_EMAIL || 'admissions@uptrendsacademy.com';
 const APPLICATION_NOTIFICATION_EMAIL = process.env.APPLICATION_NOTIFICATION_EMAIL || 'uptrendsinstitute@gmail.com';
 

@@ -100,7 +100,7 @@ const logBindingPresence = (env: Env): void => {
       VITE_SUPABASE_URL: Boolean(env.VITE_SUPABASE_URL),
       VITE_SUPABASE_ANON_KEY: Boolean(env.VITE_SUPABASE_ANON_KEY),
       SUPABASE_SERVICE_ROLE_KEY: Boolean(env.SUPABASE_SERVICE_ROLE_KEY),
-      RESEND_API_KEY: Boolean(env.RESEND_API_KEY),
+      RESEND_API_KEY: Boolean(env.RESEND_API_KEY?.trim()),
       RESEND_FROM_EMAIL: Boolean(env.RESEND_FROM_EMAIL),
       APPLICATION_MEDIA: Boolean(env.APPLICATION_MEDIA),
       PUBLIC_MEDIA: Boolean(env.PUBLIC_MEDIA),
@@ -297,13 +297,14 @@ const checkSupabaseHealth = async (env: Env): Promise<IntegrationHealth> => {
 };
 
 const checkResendHealth = async (env: Env): Promise<IntegrationHealth> => {
-  if (!env.RESEND_API_KEY) {
+  const apiKey = env.RESEND_API_KEY?.trim();
+  if (!apiKey) {
     logApiDiagnostic('system_status.resend', 'missing_configuration', ['RESEND_API_KEY']);
     return { configured: false, connected: false, error_category: 'missing_configuration' };
   }
   try {
     const response = await fetch('https://api.resend.com/domains', {
-      headers: { Authorization: `Bearer ${env.RESEND_API_KEY}` },
+      headers: { Authorization: `Bearer ${apiKey}` },
       signal: AbortSignal.timeout(5000),
     });
     if (response.ok) return { configured: true, connected: true, error_category: null };
@@ -911,7 +912,8 @@ const sendEmail = async (
     idempotencyKey?: string;
   },
 ): Promise<{ success: boolean; error?: string; provider_message_id: string | null }> => {
-  if (!env.RESEND_API_KEY) return { success: false, error: 'RESEND_API_KEY is not configured.', provider_message_id: null };
+  const apiKey = env.RESEND_API_KEY?.trim();
+  if (!apiKey) return { success: false, error: 'RESEND_API_KEY is not configured.', provider_message_id: null };
 
   try {
     const brandingClient = getSupabaseClient(env, true, 'email.branding.read');
@@ -991,7 +993,7 @@ const sendEmail = async (
     const response = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${env.RESEND_API_KEY}`,
+        Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
         ...(message.idempotencyKey ? { 'Idempotency-Key': message.idempotencyKey } : {}),
       },
