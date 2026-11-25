@@ -11,6 +11,7 @@ import {
   type OfficialStudent,
   type OfficialTermAndCondition,
 } from '../official-document';
+import { SOCIAL_LINKS } from '../src/lib/socialLinks';
 import { handleApiRequest } from '../worker-api';
 
 const userId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -138,7 +139,7 @@ test('admission approval PDF contains real student details without fee or paymen
     settings: {
       ...DEFAULT_OFFICIAL_DOCUMENT_SETTINGS,
     },
-    student,
+    student: { ...student, admissionDate: '2026-02-01T10:00:00.000Z' },
     course: selectedCourse,
   };
   const bytes = await generateOfficialPdf(input);
@@ -148,6 +149,8 @@ test('admission approval PDF contains real student details without fee or paymen
   assert.equal(pdf.getPages()[0].getHeight(), 841.89);
   const text = decodePdfText(bytes);
   assert.match(text, /ADMISSION CONFIRMATION/);
+  assert.match(text, /APPLICATION REFERENCE/);
+  assert.match(text, /01 February 2026/);
   assert.match(text, /IELTS Preparation/);
   assert.match(text, /UEA-STU-2026-0001/);
   assert.match(text, /UEA-APP-2026-0001/);
@@ -156,6 +159,16 @@ test('admission approval PDF contains real student details without fee or paymen
   assert.doesNotMatch(text, /payment|paid|balance|transaction|INR|PRIVATE-REFERENCE|private-payment-id|upi/i);
   assert.doesNotMatch(text, /Spoken English|Business English|Other Course/);
   assert.doesNotMatch(text, /\b(?:document\s*)?version\s*[:#-]?\s*\d+\b/i);
+  const contentOrder = [
+    "Uptrend's English Academy",
+    'ADMISSION CONFIRMATION',
+    'STUDENT INFORMATION',
+    'SELECTED COURSE',
+    'JOINING INFORMATION',
+    'A NOTE FROM THE ACADEMY',
+  ].map((label) => text.indexOf(label));
+  assert.ok(contentOrder.every((index) => index >= 0));
+  assert.deepEqual(contentOrder, [...contentOrder].sort((left, right) => left - right));
 });
 
 test('official PDF uses branded header and footer and omits a missing-photo placeholder', async () => {
@@ -184,7 +197,7 @@ test('official PDF uses branded header and footer and omits a missing-photo plac
 
   assert.equal(pdf.getPageCount(), 1);
   assert.match(text, /Uptrend's English Academy/);
-  assert.match(text, /DAVANGERE - KARNATAKA/);
+  assert.match(text, /Davangere, Karnataka 577002/);
   assert.match(text, /https:\/\/uptrendsenglishacademy\.in/);
   assert.match(text, /\+91 900 8000 211/);
   assert.match(text, /uptrendsinstitute@gmail\.com/);
@@ -192,9 +205,33 @@ test('official PDF uses branded header and footer and omits a missing-photo plac
   assert.match(text, /UEA-APP-2026-0001/);
   assert.doesNotMatch(text, /\bPHOTO\b|Best Wishes!|document\s*version/i);
   assert.doesNotMatch(source, /\/Subtype\s*\/Image/);
-  assert.match(commands, /0\.07058823529411765 0\.23137254901960785 0\.47058823529411764 rg/);
-  assert.match(commands, /1 0\.4196078431372549 0 rg/);
-  assert.doesNotMatch(commands, /0 0\.6666666666666666 0 rg/);
+  assert.match(commands, /0 0\.6666666666666666 0 rg/);
+  assert.doesNotMatch(commands, /0\.07058823529411765 0\.23137254901960785 0\.47058823529411764 rg/);
+  assert.doesNotMatch(commands, /1 0\.4196078431372549 0 rg/);
+});
+
+test('official PDF footer reuses the configured social links as clickable annotations', async () => {
+  const bytes = await generateOfficialPdf({
+    settings: DEFAULT_OFFICIAL_DOCUMENT_SETTINGS,
+    student,
+    course: selectedCourse,
+  });
+  const pdf = await PDFDocument.load(bytes);
+  const annotations = pdf.getPages()[0].node.Annots();
+  assert.ok(annotations);
+  assert.equal(annotations.size(), SOCIAL_LINKS.length);
+  const annotationText = annotations.asArray()
+    .map((annotation) => {
+      const resolved = pdf.context.lookup(annotation);
+      assert.ok(resolved);
+      return resolved.toString();
+    })
+    .join('\n');
+  assert.match(annotationText, /\/NewWindow\s+true/);
+  for (const link of SOCIAL_LINKS) {
+    assert.ok(annotationText.includes(link.url), `Expected a PDF link for ${link.name}`);
+    assert.ok(annotationText.includes(`Visit us on ${link.name}`), `Expected an accessible label for ${link.name}`);
+  }
 });
 
 test('official PDF embeds the configured logo only when logo display is enabled', async () => {
@@ -300,8 +337,8 @@ test('graduate and working PDFs use applicant contacts and never parent contacts
       course: selectedCourse,
     });
     const text = decodePdfText(bytes);
-    assert.match(text, /Mobile Number/);
-    assert.match(text, /Email ID/);
+    assert.match(text, /Mobile Number/i);
+    assert.match(text, /Email ID/i);
     assert.match(text, /\+919876500001/);
     assert.match(text, new RegExp(`${qualificationCategory.toLowerCase()}@example\\.com`));
     assert.doesNotMatch(text, /Parent Phone Number|Parent Email ID|hidden-parent|HIDDEN-PARENT/);
@@ -490,6 +527,7 @@ test('approval attaches and stores the PDF generated from the immutable issuance
       application_reference: student.applicationNumber,
       student_id: student.studentId,
       student_name: student.fullName,
+      approved_at: '2026-02-01T10:00:00.000Z',
       email: student.email,
       mobile: student.mobile,
       qualification: student.qualification,
@@ -642,6 +680,7 @@ test('approval attaches and stores the PDF generated from the immutable issuance
   const attachedText = decodePdfText(attachedPdf);
   assert.match(attachedText, /IELTS Preparation/);
   assert.match(attachedText, /UEA-STU-2026-0001/);
+  assert.match(attachedText, /01 February 2026/);
   assert.doesNotMatch(attachedText, /\b(?:document\s*)?version\s*[:#-]?\s*\d+\b/i);
   assert.match(attachedText, /2026-02-01/);
   assert.match(attachedText, /Monday to Saturday/);

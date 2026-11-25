@@ -1307,6 +1307,7 @@ const generatePdfFromSnapshot = async (
         fullName: application.student_name,
         studentId: application.student_id,
         applicationNumber: application.application_reference,
+        admissionDate: typeof application.approved_at === 'string' ? application.approved_at : null,
         qualificationCategory: ['Student', 'Graduate', 'Working'].includes(application.qualification_category)
           ? application.qualification_category
           : null,
