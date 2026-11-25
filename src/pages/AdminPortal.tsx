@@ -60,6 +60,7 @@ import {
 import { extractYouTubeId } from '../lib/youtube';
 import { getWhatsAppUrl } from '../lib/whatsapp';
 import { fetchSystemStatus, type IntegrationHealth, type SystemStatus } from '../lib/systemStatus';
+import { canAccessAdminSection } from '../lib/adminPermissions';
 import { AdminDemoClassRequests } from '../components/AdminDemoClassRequests';
 import { AboutUsManagement } from '../components/AboutUsManagement';
 import { EmailSettingsTemplates } from '../components/EmailSettingsTemplates';
@@ -647,10 +648,10 @@ useEffect(() => {
         requestJson(isAdminOrHigher ? '/api/admin/programs' : '/api/programs', isAdminOrHigher ? { headers } : undefined),
         requestJson(isAdminOrHigher ? '/api/admin/announcements' : '/api/announcements', isAdminOrHigher ? { headers } : undefined),
         isAdminOrHigher ? requestJson('/api/admin/media', { headers }) : Promise.resolve([]),
-        isSuperAdmin
+        isAdminOrHigher
           ? requestJson('/api/admin/faqs', { headers })
           : requestJson('/api/faqs'),
-        requestJson('/api/branding'),
+        isSuperAdmin ? requestJson('/api/branding') : Promise.resolve(null),
         isSuperAdmin
           ? requestJson('/api/admin/profiles', { headers })
           : Promise.resolve([]),
@@ -1281,10 +1282,11 @@ const saveOfficialHeaderPhoto = async () => {
 };
 
   useEffect(() => {
+    if (!isSuperAdmin) return;
     void fetchOfficialDocumentTerms();
-    if (isSuperAdmin) void fetchOfficialDocumentSettings();
-    else if (isAdminOrHigher) void loadOfficialHeaderPhoto();
-  }, [isSuperAdmin, isAdminOrHigher]);
+    void fetchOfficialDocumentSettings();
+    void loadOfficialHeaderPhoto();
+  }, [isSuperAdmin]);
 
 
 
@@ -2024,28 +2026,25 @@ const res = await fetchAdmin(url, {
 
   // Navigation Items according to role
   const navItems = [
-    { id: 'dashboard', label: 'Dashboard Overview', icon: LayoutDashboard, minRole: 'staff' },
-    { id: 'applications', label: 'Student Applications', icon: Users, minRole: 'staff' },
-    { id: 'demo-class-requests', label: 'Demo Class Requests', icon: GraduationCap, minRole: 'staff' },
-    { id: 'callbacks', label: 'Callback Requests', icon: PhoneCall, minRole: 'staff' },
-    { id: 'programs', label: 'Programs Management', icon: BookOpen, minRole: 'admin' },
-    { id: 'media', label: 'Media & Testimonials', icon: Video, minRole: 'admin' },
-    { id: 'announcements', label: 'Announcements', icon: Volume2, minRole: 'admin' },
-    { id: 'branding', label: 'Site Branding & Assets', icon: Palette, minRole: 'admin' },
-    { id: 'faqs', label: 'FAQs Management', icon: HelpCircle, minRole: 'super_admin' },
-    { id: 'about-us', label: 'About Us Management', icon: UserCog, minRole: 'super_admin' },
-    { id: 'notifications', label: 'Email History', icon: Send, minRole: 'super_admin' },
-    { id: 'email-settings', label: 'Email Settings & Templates', icon: Send, minRole: 'staff' },
-    { id: 'roles', label: 'Admin Roles & Access', icon: ShieldCheck, minRole: 'super_admin' },
-    { id: 'settings', label: 'Settings & PDF Config', icon: Settings, minRole: 'staff' },
-  ];
+    { id: 'dashboard', label: 'Dashboard Overview', icon: LayoutDashboard },
+    { id: 'applications', label: 'Student Applications', icon: Users },
+    { id: 'demo-class-requests', label: 'Demo Class Requests', icon: GraduationCap },
+    { id: 'callbacks', label: 'Callback Requests', icon: PhoneCall },
+    { id: 'programs', label: 'Programs Management', icon: BookOpen },
+    { id: 'media', label: 'Media & Testimonials', icon: Video },
+    { id: 'announcements', label: 'Announcements', icon: Volume2 },
+    { id: 'branding', label: 'Site Branding & Assets', icon: Palette },
+    { id: 'faqs', label: 'FAQs Management', icon: HelpCircle },
+    { id: 'about-us', label: 'About Us Management', icon: UserCog },
+    { id: 'notifications', label: 'Email History', icon: Send },
+    { id: 'email-settings', label: 'Email Settings & Templates', icon: Send },
+    { id: 'roles', label: 'Admin Roles & Access', icon: ShieldCheck },
+    { id: 'settings', label: 'Settings & PDF Config', icon: Settings },
+  ] as const;
 
-  const allowedNavItems = navItems.filter((item) => {
-    if (item.minRole === 'staff') return true;
-    if (item.minRole === 'admin') return isAdminOrHigher;
-    if (item.minRole === 'super_admin') return isSuperAdmin;
-    return false;
-  });
+  const allowedNavItems = navItems.filter((item) =>
+    canAccessAdminSection(currentAdmin.role, item.id)
+  );
 
   const pendingRequestCounts = {
     applications: applications.filter((application) => application.status === 'Pending').length,
@@ -3816,7 +3815,7 @@ const res = await fetchAdmin(url, {
             </div>
           )}
 
-          {activeTab === 'faqs' && isSuperAdmin && (
+          {activeTab === 'faqs' && canAccessAdminSection(currentAdmin.role, 'faqs') && (
             <div className="space-y-6">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
@@ -3977,7 +3976,7 @@ const res = await fetchAdmin(url, {
           )}
 
           {/* TAB: SITE BRANDING & ASSETS */}
-          {activeTab === 'branding' && (
+          {activeTab === 'branding' && canAccessAdminSection(currentAdmin.role, 'branding') && (
             <div className="max-w-6xl space-y-5">
               <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-xs sm:p-5">
                 <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-orange-50 text-orange-600">
@@ -4147,12 +4146,12 @@ const res = await fetchAdmin(url, {
             </div>
           )}
 
-          {activeTab === 'about-us' && isSuperAdmin && (
+          {activeTab === 'about-us' && canAccessAdminSection(currentAdmin.role, 'about-us') && (
             <AboutUsManagement currentAdmin={currentAdmin} />
           )}
 
           {/* TAB: ADMIN ROLES & ACCESS (SUPER ADMIN ONLY) */}
-          {activeTab === 'roles' && isSuperAdmin && (
+          {activeTab === 'roles' && canAccessAdminSection(currentAdmin.role, 'roles') && (
             <div className="space-y-6">
               <div>
                 <h1 className="text-xl sm:text-2xl font-extrabold text-slate-950 leading-tight">Admin Roles & Access Control</h1>
@@ -4336,7 +4335,7 @@ const res = await fetchAdmin(url, {
             </div>
           )}
 
-          {activeTab === 'email-settings' && (
+          {activeTab === 'email-settings' && canAccessAdminSection(currentAdmin.role, 'email-settings') && (
             <EmailSettingsTemplates
               currentAdmin={currentAdmin}
               onSessionExpired={onSessionExpired}
@@ -4344,7 +4343,7 @@ const res = await fetchAdmin(url, {
           )}
 
           {/* TAB 8: SETTINGS & OFFICIAL PDF */}
-          {activeTab === 'settings' && (
+          {activeTab === 'settings' && canAccessAdminSection(currentAdmin.role, 'settings') && (
             <div className="mx-auto max-w-6xl space-y-5">
               <header className="rounded-2xl border border-orange-100 bg-gradient-to-r from-[#fff8ef] via-white to-[#EAF3FF] p-5 shadow-sm">
                 <p className="text-[10px] font-bold uppercase tracking-[.16em] text-orange-700">Official documents</p>
@@ -4741,7 +4740,9 @@ const res = await fetchAdmin(url, {
         </main>
       </div>
 
-      {activeTab === 'settings' && officialTermsPreviewOpen && (
+      {activeTab === 'settings' &&
+        canAccessAdminSection(currentAdmin.role, 'settings') &&
+        officialTermsPreviewOpen && (
         <div
           className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-sm"
           onClick={(event) => {

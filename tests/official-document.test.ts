@@ -1098,7 +1098,7 @@ test('local Express routing and the Admin Portal expose the protected resend act
   assert.match(adminSource, /resendingOfficialPdfIdsRef\.current\.has\(appId\)/);
 });
 
-test('authorized admins can list and download detached official-document history by application reference', async () => {
+test('super admins can list and download detached official-document history by application reference', async () => {
   const firstVersionKey = `official-documents/${applicationId}/v1-eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee.pdf`;
   const secondVersionKey = `official-documents/${applicationId}/v2-ffffffff-ffff-4fff-8fff-ffffffffffff.pdf`;
   const pdfBytes = await generateOfficialPdf({ settings: DEFAULT_OFFICIAL_DOCUMENT_SETTINGS, student, course: selectedCourse });
@@ -1169,7 +1169,7 @@ test('authorized admins can list and download detached official-document history
     },
   });
 
-  await withAdminFetch('admin', async (_request, url) => {
+  await withAdminFetch('super_admin', async (_request, url) => {
     if (!url.pathname.endsWith('/official_document_issuances')) throw new Error(`Unexpected request: ${url.pathname}`);
     if (url.searchParams.has('version_number')) return Response.json([versions[0]]);
     return Response.json(versions);
@@ -1266,7 +1266,7 @@ test('official PDF settings require super-admin and store uploaded assets privat
   assert.match(uploadedKeys[0], /^official-document-assets\/[0-9a-f-]+\.png$/i);
 });
 
-test('admins can replace or remove only the existing private admission PDF header photo', async () => {
+test('only super admins can replace or remove the private admission PDF header photo', async () => {
   const savedDocumentData: Record<string, unknown> = {
     ...DEFAULT_OFFICIAL_DOCUMENT_SETTINGS,
     graphicObjectKey: 'official-document-assets/eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee.png',
@@ -1308,7 +1308,7 @@ test('admins can replace or remove only the existing private admission PDF heade
   };
   const image = `data:image/png;base64,${Buffer.from(pngBytes).toString('base64')}`;
 
-  await withAdminFetch('admin', handleSettingsRequest, async () => {
+  await withAdminFetch('super_admin', handleSettingsRequest, async () => {
     const replaceResponse = await handleApiRequest(
       authorizedRequest('/api/admin/official-document', 'PUT', {
         settings: {},
@@ -1504,17 +1504,15 @@ test('official document terms support super-admin edits and persistence while st
   assert.equal((savedDocumentData.colors as Record<string, unknown>).navy, '#234567');
   assert.equal((savedDocumentData.layout as Record<string, unknown>).showDecorations, true);
 
-  await withAdminFetch('staff', handleSettingsRequest, async () => {
-    const readResponse = await handleApiRequest(
-      authorizedRequest('/api/admin/official-document/terms'),
-      env,
-    );
-    assert.equal(readResponse.status, 200);
-    assert.deepEqual(
-      (await readResponse.json() as { termsAndConditions: unknown }).termsAndConditions,
-      savedDocumentData.termsAndConditions,
-    );
-  });
+  for (const role of ['staff', 'admin'] as const) {
+    await withAdminFetch(role, handleSettingsRequest, async () => {
+      const readResponse = await handleApiRequest(
+        authorizedRequest('/api/admin/official-document/terms'),
+        env,
+      );
+      assert.equal(readResponse.status, 403);
+    });
+  }
 });
 
 test('terms RPC failures return a safe error and log Supabase diagnostics without request data', async () => {
@@ -1755,7 +1753,7 @@ test('official PDF logo assets remain available while fee confirmation PDF is re
     },
   });
 
-  await withAdminFetch('staff', async (request, url) => {
+  await withAdminFetch('super_admin', async (request, url) => {
     if (!url.pathname.endsWith('/official_document_settings')) {
       throw new Error(`Unexpected Supabase request: ${url.pathname}`);
     }
@@ -1779,7 +1777,9 @@ test('official PDF logo assets remain available while fee confirmation PDF is re
 
 test('Admin Portal renders the role-gated Terms editor after PDF settings and loads it independently', async () => {
   const adminPortal = await readFile(new URL('../src/pages/AdminPortal.tsx', import.meta.url), 'utf8');
-  const settingsTabIndex = adminPortal.indexOf("{activeTab === 'settings' && (");
+  const settingsTabIndex = adminPortal.indexOf(
+    "{activeTab === 'settings' && canAccessAdminSection(currentAdmin.role, 'settings') && (",
+  );
   const settingsFormIndex = adminPortal.indexOf('saveOfficialDocumentSettings().catch');
   const settingsFormEndIndex = adminPortal.indexOf('</form>}', settingsFormIndex);
   const termsEditorIndex = adminPortal.indexOf('aria-labelledby="official-terms-heading"');
@@ -1788,9 +1788,9 @@ test('Admin Portal renders the role-gated Terms editor after PDF settings and lo
   assert.ok(settingsFormEndIndex > settingsFormIndex);
   assert.ok(termsEditorIndex > settingsFormEndIndex);
 
-  const settingsNavigation = adminPortal.match(/\{ id: 'settings', label: 'Settings & PDF Config', icon: Settings, minRole: 'staff' \}/);
-  assert.ok(settingsNavigation, 'Settings must remain reachable by Staff and higher roles');
-  assert.match(adminPortal, /void fetchOfficialDocumentTerms\(\);\s*if \(isSuperAdmin\) void fetchOfficialDocumentSettings\(\);\s*else if \(isAdminOrHigher\) void loadOfficialHeaderPhoto\(\);/);
+  const settingsNavigation = adminPortal.match(/\{ id: 'settings', label: 'Settings & PDF Config', icon: Settings \}/);
+  assert.ok(settingsNavigation, 'Settings navigation must use the shared role gate');
+  assert.match(adminPortal, /if \(!isSuperAdmin\) return;\s*void fetchOfficialDocumentTerms\(\);\s*void fetchOfficialDocumentSettings\(\);\s*void loadOfficialHeaderPhoto\(\);/);
   assert.match(adminPortal, /Admission PDF Header Photo/);
   assert.match(adminPortal, /Change \/ Replace Photo/);
   assert.match(adminPortal, /Save \/ Apply Photo/);
@@ -2272,7 +2272,7 @@ test('ready issuances reject missing PDF object keys without regeneration or mut
       },
     });
 
-    await withAdminFetch('admin', async (request, url) => {
+    await withAdminFetch('super_admin', async (request, url) => {
       if (!url.pathname.endsWith('/official_document_issuances')) {
         throw new Error(`Unexpected request: ${url.pathname}`);
       }
@@ -2333,7 +2333,7 @@ test('regenerated issued PDFs omit the visible version label', async () => {
     },
   };
 
-  await withAdminFetch('admin', async (_request, url) => {
+  await withAdminFetch('super_admin', async (_request, url) => {
     assert.ok(url.pathname.endsWith('/official_document_issuances'));
     return Response.json([issuance]);
   }, async () => {
@@ -2381,7 +2381,7 @@ test('ready issuance serves the immutable historical PDF from R2 without overwri
     },
   });
 
-  await withAdminFetch('admin', async (request, url) => {
+  await withAdminFetch('super_admin', async (request, url) => {
     if (!url.pathname.endsWith('/official_document_issuances')) {
       throw new Error(`Unexpected request: ${url.pathname}`);
     }
@@ -2440,7 +2440,7 @@ test('missing historical payment-update PDFs fail visibly instead of regeneratin
     },
   });
 
-  await withAdminFetch('admin', async (_request, url) => {
+  await withAdminFetch('super_admin', async (_request, url) => {
     if (!url.pathname.endsWith('/official_document_issuances')) {
       throw new Error(`Unexpected request: ${url.pathname}`);
     }

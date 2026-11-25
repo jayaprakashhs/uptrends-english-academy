@@ -361,15 +361,9 @@ test('branding API enforces the 3 MB limit for logos and hero photos', async () 
   }
 });
 
-test('admins can upload and remove the hero photo without gaining access to other branding fields', async () => {
+test('admins cannot upload or remove branding assets', async () => {
   const originalFetch = globalThis.fetch;
   const publicMedia = mockR2Bucket();
-  const existingBranding = {
-    id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
-    logo_url: 'https://media.example/branding/site-logo.png',
-    hero_photo_url: 'https://media.example/branding/hero-photo.png',
-  };
-  let savedBranding = { ...existingBranding };
   globalThis.fetch = async (input, init) => {
     const request = input instanceof Request ? input : new Request(input, init);
     const url = new URL(request.url);
@@ -378,55 +372,288 @@ test('admins can upload and remove the hero photo without gaining access to othe
     if (url.pathname === '/rest/v1/admin_profiles') {
       return Response.json([{ id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', full_name: 'Test Admin', role: 'admin', is_active: true }]);
     }
-    if (url.pathname === '/rest/v1/site_branding' && request.method === 'GET') return Response.json([savedBranding]);
-    if (url.pathname === '/rest/v1/site_branding' && request.method === 'PATCH') {
-      savedBranding = { ...savedBranding, ...await request.json() as typeof savedBranding };
-      return Response.json(savedBranding);
+    throw new Error(`Unexpected test request: ${url.hostname}${url.pathname}`);
+  };
+
+  try {
+    for (const body of [
+      { hero_photo_file_base64: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/S2cAAAAASUVORK5CYII=' },
+      { hero_photo_url: null },
+    ]) {
+      const response = await handleApiRequest(
+        new Request('https://academy.example/api/admin/branding', {
+          method: 'PUT',
+          headers: { Authorization: 'Bearer test-token', 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        }),
+        {
+          SUPABASE_URL: 'https://project.example',
+          SUPABASE_SERVICE_ROLE_KEY: 'test-service-role-key',
+          CLOUDFLARE_R2_PUBLIC_URL: 'https://media.example',
+          PUBLIC_MEDIA: publicMedia.binding,
+        },
+      );
+      assert.equal(response.status, 403);
+    }
+
+    assert.equal(publicMedia.puts.length, 0);
+    assert.equal(publicMedia.deletes.length, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('FAQ management is available to admin and super admin but not staff', async () => {
+  const originalFetch = globalThis.fetch;
+  const faqId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+  let currentRole: 'staff' | 'admin' | 'super_admin' = 'staff';
+  let faq = {
+    id: faqId,
+    question: 'Initial question?',
+    answer: 'Initial answer.',
+    is_published: true,
+    display_order: 1,
+  };
+  const databaseMethods: string[] = [];
+
+  globalThis.fetch = async (input, init) => {
+    const request = input instanceof Request ? input : new Request(input, init);
+    const url = new URL(request.url);
+    if (url.hostname !== 'project.example') throw new Error(`Unexpected test request: ${url.hostname}${url.pathname}`);
+    if (url.pathname === '/auth/v1/user') {
+      return Response.json({ id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' });
+    }
+    if (url.pathname === '/rest/v1/admin_profiles') {
+      return Response.json([{
+        id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        full_name: 'Test Admin',
+        role: currentRole,
+        is_active: true,
+      }]);
+    }
+    if (url.pathname === '/rest/v1/faqs') {
+      databaseMethods.push(request.method);
+      if (request.method === 'GET') return Response.json([faq]);
+      if (request.method === 'POST') {
+        faq = { ...faq, ...await request.json() as Partial<typeof faq> };
+        return Response.json(faq, { status: 201 });
+      }
+      if (request.method === 'PATCH') {
+        faq = { ...faq, ...await request.json() as Partial<typeof faq> };
+        return Response.json(faq);
+      }
+      if (request.method === 'DELETE') return Response.json({ id: faqId });
+    }
+    throw new Error(`Unexpected test request: ${url.hostname}${url.pathname}`);
+  };
+
+  const env = {
+    SUPABASE_URL: 'https://project.example',
+    SUPABASE_SERVICE_ROLE_KEY: 'test-service-role-key',
+  };
+  const headers = { Authorization: 'Bearer test-admin-token', 'Content-Type': 'application/json' };
+  const request = (path: string, method: string, body?: Record<string, unknown>) => new Request(
+    `https://academy.example${path}`,
+    {
+      method,
+      headers,
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    },
+  );
+
+  try {
+    const operations = [
+      { path: '/api/admin/faqs', method: 'GET' },
+      { path: '/api/admin/faqs', method: 'POST', body: { question: 'New question?', answer: 'New answer.', is_published: false, display_order: 7 } },
+      { path: `/api/admin/faqs/${faqId}`, method: 'PUT', body: { display_order: 8, is_published: true } },
+      { path: `/api/admin/faqs/${faqId}`, method: 'DELETE' },
+    ] as const;
+
+    for (const role of ['staff', 'admin', 'super_admin'] as const) {
+      currentRole = role;
+      for (const operation of operations) {
+        const response = await handleApiRequest(
+          request(operation.path, operation.method, 'body' in operation ? operation.body : undefined),
+          env,
+        );
+        if (role === 'staff') {
+          assert.equal(response.status, 403, `${role} ${operation.method}`);
+          continue;
+        }
+        assert.equal(response.status, operation.method === 'POST' ? 201 : 200, `${role} ${operation.method}`);
+        if (operation.method === 'PUT') {
+          const updated = await response.json() as typeof faq;
+          assert.equal(updated.display_order, 8);
+          assert.equal(updated.is_published, true);
+        }
+      }
+    }
+
+    assert.deepEqual(databaseMethods, [
+      'GET', 'POST', 'PATCH', 'DELETE',
+      'GET', 'POST', 'PATCH', 'DELETE',
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('staff and admins are forbidden from email, PDF, and site-branding admin APIs', async () => {
+  const originalFetch = globalThis.fetch;
+  let currentRole: 'staff' | 'admin' | 'super_admin' = 'staff';
+  globalThis.fetch = async (input, init) => {
+    const request = input instanceof Request ? input : new Request(input, init);
+    const url = new URL(request.url);
+    if (url.hostname !== 'project.example') throw new Error(`Unexpected test request: ${url.hostname}${url.pathname}`);
+    if (url.pathname === '/auth/v1/user') {
+      return Response.json({ id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' });
+    }
+    if (url.pathname === '/rest/v1/admin_profiles') {
+      return Response.json([{
+        id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        full_name: 'Test Admin',
+        role: currentRole,
+        is_active: true,
+      }]);
+    }
+    throw new Error(`Unauthorized request reached a protected resource: ${url.pathname}`);
+  };
+
+  const env = {
+    SUPABASE_URL: 'https://project.example',
+    SUPABASE_SERVICE_ROLE_KEY: 'test-service-role-key',
+  };
+  const protectedRequests: Array<{ path: string; method: string; body?: Record<string, unknown> }> = [
+    { path: '/api/admin/email-settings', method: 'GET' },
+    { path: '/api/admin/email-settings', method: 'PUT', body: {} },
+    { path: '/api/admin/email-settings/reset', method: 'POST' },
+    { path: '/api/admin/email-settings/header-photo', method: 'POST', body: {} },
+    { path: '/api/admin/email-settings/header-photo?key=email-assets/00000000-0000-4000-8000-000000000000.jpg', method: 'DELETE' },
+    { path: '/api/admin/branding', method: 'PUT', body: {} },
+    { path: '/api/admin/official-document', method: 'GET' },
+    { path: '/api/admin/official-document', method: 'PUT', body: {} },
+    { path: '/api/admin/official-document/terms', method: 'GET' },
+    { path: '/api/admin/official-document/terms', method: 'PUT', body: {} },
+    { path: '/api/admin/official-document/preview', method: 'POST', body: {} },
+    { path: '/api/admin/official-document/versions?application_id=bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', method: 'GET' },
+    { path: '/api/admin/official-document/issued?application_id=bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', method: 'GET' },
+    { path: '/api/admin/official-document/assets?type=logo', method: 'GET' },
+    { path: '/api/admin/official-document/assets?type=graphic', method: 'GET' },
+  ];
+
+  try {
+    for (const role of ['staff', 'admin'] as const) {
+      currentRole = role;
+      for (const operation of protectedRequests) {
+        const response = await handleApiRequest(new Request(
+          `https://academy.example${operation.path}`,
+          {
+            method: operation.method,
+            headers: { Authorization: 'Bearer test-admin-token', 'Content-Type': 'application/json' },
+            ...(operation.body ? { body: JSON.stringify(operation.body) } : {}),
+          },
+        ), env);
+        assert.equal(response.status, 403, `${role} ${operation.method} ${operation.path}`);
+      }
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('super admin can read email and official document settings', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    const request = input instanceof Request ? input : new Request(input, init);
+    const url = new URL(request.url);
+    if (url.hostname !== 'project.example') throw new Error(`Unexpected test request: ${url.hostname}${url.pathname}`);
+    if (url.pathname === '/auth/v1/user') {
+      return Response.json({ id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' });
+    }
+    if (url.pathname === '/rest/v1/admin_profiles') {
+      return Response.json([{
+        id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        full_name: 'Test Super Admin',
+        role: 'super_admin',
+        is_active: true,
+      }]);
+    }
+    if (url.pathname === '/rest/v1/email_template_settings' ||
+      url.pathname === '/rest/v1/official_document_settings') {
+      return Response.json(null);
+    }
+    if (url.pathname === '/rest/v1/site_branding') {
+      return Response.json([{ logo_url: 'https://media.example/branding/logo.png' }]);
     }
     throw new Error(`Unexpected test request: ${url.hostname}${url.pathname}`);
   };
 
   try {
-    const uploadResponse = await handleApiRequest(
-      new Request('https://academy.example/api/admin/branding', {
-        method: 'PUT',
-        headers: { Authorization: 'Bearer test-token', 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          hero_photo_file_base64: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/S2cAAAAASUVORK5CYII=',
+    for (const path of [
+      '/api/admin/email-settings',
+      '/api/admin/official-document',
+      '/api/admin/official-document/terms',
+    ]) {
+      const response = await handleApiRequest(
+        new Request(`https://academy.example${path}`, {
+          headers: { Authorization: 'Bearer test-super-admin-token' },
         }),
-      }),
-      {
-        SUPABASE_URL: 'https://project.example',
-        SUPABASE_SERVICE_ROLE_KEY: 'test-service-role-key',
-        CLOUDFLARE_R2_PUBLIC_URL: 'https://media.example',
-        PUBLIC_MEDIA: publicMedia.binding,
-      },
-    );
-    assert.equal(uploadResponse.status, 200);
-    assert.match(savedBranding.hero_photo_url || '', /^https:\/\/media\.example\/branding\/.+\.png$/);
-    assert.equal(savedBranding.logo_url, existingBranding.logo_url);
-    const uploadedHeroKey = publicMedia.puts[0].key;
-    assert.deepEqual(publicMedia.deletes, ['branding/hero-photo.png']);
+        {
+          SUPABASE_URL: 'https://project.example',
+          SUPABASE_SERVICE_ROLE_KEY: 'test-service-role-key',
+        },
+      );
+      assert.equal(response.status, 200, path);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
 
-    const removeResponse = await handleApiRequest(
-      new Request('https://academy.example/api/admin/branding', {
-        method: 'PUT',
-        headers: { Authorization: 'Bearer test-token', 'Content-Type': 'application/json' },
-        body: JSON.stringify({ hero_photo_url: null }),
-      }),
-      {
-        SUPABASE_URL: 'https://project.example',
-        SUPABASE_SERVICE_ROLE_KEY: 'test-service-role-key',
-        CLOUDFLARE_R2_PUBLIC_URL: 'https://media.example',
-        PUBLIC_MEDIA: publicMedia.binding,
-      },
-    );
+test('super admin cannot change their own role through the privileged profile endpoint', async () => {
+  const originalFetch = globalThis.fetch;
+  const profileId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  let profileUpdates = 0;
+  globalThis.fetch = async (input, init) => {
+    const request = input instanceof Request ? input : new Request(input, init);
+    const url = new URL(request.url);
+    if (url.hostname !== 'project.example') throw new Error(`Unexpected test request: ${url.hostname}${url.pathname}`);
+    if (url.pathname === '/auth/v1/user') return Response.json({ id: profileId });
+    if (url.pathname === '/rest/v1/admin_profiles' && request.method === 'GET') {
+      return Response.json([{
+        id: profileId,
+        full_name: 'Test Super Admin',
+        role: 'super_admin',
+        is_active: true,
+      }]);
+    }
+    if (url.pathname === '/rest/v1/admin_profiles' && request.method === 'PATCH') {
+      profileUpdates += 1;
+      return Response.json({ id: profileId });
+    }
+    throw new Error(`Unexpected test request: ${url.hostname}${url.pathname}`);
+  };
 
-    assert.equal(removeResponse.status, 200);
-    assert.equal(savedBranding.hero_photo_url, null);
-    assert.equal(savedBranding.logo_url, existingBranding.logo_url);
-    assert.equal(publicMedia.puts.length, 1);
-    assert.deepEqual(publicMedia.deletes, ['branding/hero-photo.png', uploadedHeroKey]);
+  try {
+    for (const role of ['staff', 'admin', 'super_admin']) {
+      const response = await handleApiRequest(
+        new Request(`https://academy.example/api/admin/profiles/${profileId}`, {
+          method: 'PUT',
+          headers: {
+            Authorization: 'Bearer test-super-admin-token',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ role }),
+        }),
+        {
+          SUPABASE_URL: 'https://project.example',
+          SUPABASE_SERVICE_ROLE_KEY: 'test-service-role-key',
+        },
+      );
+      assert.equal(response.status, 400);
+      assert.deepEqual(await response.json(), { error: 'Cannot change your own role.' });
+    }
+    assert.equal(profileUpdates, 0);
   } finally {
     globalThis.fetch = originalFetch;
   }

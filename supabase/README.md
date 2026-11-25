@@ -9,6 +9,16 @@ This guide details the complete database schema, Row-Level Security (RLS) polici
 The complete, self-contained migration script is located at:
 `supabase/migrations/20261024_complete_schema_and_super_admin.sql`
 
+The files `001_initial_schema.sql`, `20261024_complete_schema_and_super_admin.sql`,
+and `20261024000000_create_uptrends_schema.sql` are overlapping historical
+bootstrap snapshots, not sequential setup steps. They create policies with
+duplicate names, so applying them together can stop a fresh setup before later
+migrations run. For a fresh database using the documented SQL Editor workflow,
+apply `20261024_complete_schema_and_super_admin.sql` once, then apply the
+subsequent migrations in the order described below. Do not replay a bootstrap
+snapshot on an existing database; verify its migration history and apply only
+the pending forward migrations. Existing bootstrap files are retained unchanged.
+
 It creates:
 - **13 Database Tables** in schema `public`:
   1. `admin_profiles` (Admin & Staff roles, activation status, audit timestamps)
@@ -213,6 +223,42 @@ records. Public visitors should see only published profiles and the published
 video; without a published video configuration the page keeps its existing
 default video. Older `photo_url`/`poster_url` values, if any, are left
 untouched but are no longer used for managed About Us images.
+
+## 2.6. Admin Portal role permissions
+
+After reviewing the SQL, apply
+`supabase/migrations/20261126020000_admin_portal_role_permissions.sql` to
+update FAQ management access. It replaces the Super-Admin-only FAQ management
+policy with `public.is_admin()`, allowing active Admin and Super Admin profiles
+to manage FAQs while keeping Staff limited to the existing public, published
+FAQ read policy.
+
+The migration does not change the existing Super Admin-only policies for site
+branding or other site content. Email Settings, official PDF configuration,
+and private asset operations remain mediated by Super-Admin-only Worker
+endpoints; the email settings table and official document settings table do not
+grant direct browser-role access. The application does not apply this
+migration automatically. Coordinate and apply it through the deployment's
+normal Supabase migration process; do not apply it as part of a frontend or
+Worker deployment without approval.
+
+## 2.7. Admin profile RLS hardening
+
+Apply
+`supabase/migrations/20261127000000_admin_profile_rls_and_bootstrap_policy_compatibility.sql`
+after the selected bootstrap and other pending migrations. It removes the
+legacy broad profile-read policies and replaces them with own-profile reads for
+authenticated users and full profile management for active Super Admins only.
+Staff and Admin users cannot read other profiles; profile updates and deletes
+cannot target the acting Super Admin's own row. The migration changes grants
+only for `admin_profiles`, keeps RLS enabled, and does not alter profile or
+authentication records.
+
+The migration cannot repair a fresh migration run that has already stopped on a
+duplicate policy in an earlier bootstrap file. Avoid that failure by following
+the single-bootstrap setup above; do not edit or replay previously applied
+bootstrap migrations. The migration is not applied automatically and must not
+be applied to production without approval.
 
 ---
 

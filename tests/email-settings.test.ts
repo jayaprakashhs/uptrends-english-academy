@@ -148,7 +148,7 @@ test('renderer safely emits configured branding, footer, and optional button con
   assert.match(email.html, /Automated notice\./);
 });
 
-test('email settings APIs allow all admin roles to read but reserve writes and reset for Super Admin', async () => {
+test('email settings APIs are Super Admin-only for reads, writes, and reset', async () => {
   const originalFetch = globalThis.fetch;
   const userId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
   let role: 'staff' | 'admin' | 'super_admin' = 'staff';
@@ -196,7 +196,7 @@ test('email settings APIs allow all admin roles to read but reserve writes and r
     for (const adminRole of ['staff', 'admin'] as const) {
       role = adminRole;
       const readResponse = await send('/api/admin/email-settings');
-      assert.equal(readResponse.status, 200);
+      assert.equal(readResponse.status, 403);
       const writeResponse = await send('/api/admin/email-settings', 'PUT', {
         settings: DEFAULT_EMAIL_SETTINGS,
       });
@@ -206,6 +206,8 @@ test('email settings APIs allow all admin roles to read but reserve writes and r
     }
 
     role = 'super_admin';
+    const initialRead = await send('/api/admin/email-settings');
+    assert.equal(initialRead.status, 200);
     const updated = structuredClone(DEFAULT_EMAIL_SETTINGS);
     updated.branding.academyName = 'Updated Academy';
     updated.templates.demo_applicant.heading = 'Updated Demo Heading';

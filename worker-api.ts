@@ -1697,7 +1697,7 @@ const updateAnnouncement = async (request: Request, env: Env, id: string): Promi
 };
 
 const createFaq = async (request: Request, env: Env): Promise<Response> => {
-  const auth = await requireAdmin(request, env, 'super_admin');
+  const auth = await requireAdmin(request, env, 'admin');
   if (isResponse(auth)) return auth;
   const body = await parseJson(request);
   if (isResponse(body)) return body;
@@ -1772,7 +1772,7 @@ const updateReview = async (request: Request, env: Env, id: string): Promise<Res
 };
 
 const updateFaq = async (request: Request, env: Env, id: string): Promise<Response> => {
-  const auth = await requireAdmin(request, env, 'super_admin');
+  const auth = await requireAdmin(request, env, 'admin');
   if (isResponse(auth)) return auth;
   const body = await parseJson(request);
   if (isResponse(body)) return body;
@@ -2799,6 +2799,7 @@ const updateProfile = async (request: Request, env: Env, id: string): Promise<Re
     updates.is_active = body.is_active;
   }
   if (!Object.keys(updates).length) return errorResponse('role or is_active is required.', 400);
+  if (id === auth.profile.id && updates.role !== undefined) return errorResponse('Cannot change your own role.', 400);
   if (id === auth.profile.id && updates.is_active === false) return errorResponse('Cannot deactivate your own super admin account.', 400);
 
   const { data, error } = await auth.supabase.from('admin_profiles')
@@ -3325,7 +3326,7 @@ const getOfficialDocumentTerms = async (
   request: Request,
   env: Env,
 ): Promise<Response> => {
-  const auth = await requireAdmin(request, env, 'staff');
+  const auth = await requireAdmin(request, env, 'super_admin');
   if (isResponse(auth)) return auth;
   const { data, error } = await auth.supabase
     .from('official_document_settings')
@@ -3371,7 +3372,7 @@ const saveOfficialDocumentTerms = async (
 };
 
 const getEmailSettings = async (request: Request, env: Env): Promise<Response> => {
-  const auth = await requireAdmin(request, env, 'staff');
+  const auth = await requireAdmin(request, env, 'super_admin');
   if (isResponse(auth)) return auth;
   const result = await readEmailSettings(auth.supabase);
   if (result.issue) {
@@ -3623,7 +3624,7 @@ const saveOfficialDocumentSettings = async (
   request: Request,
   env: Env,
 ): Promise<Response> => {
-  const auth = await requireAdmin(request, env, 'admin');
+  const auth = await requireAdmin(request, env, 'super_admin');
   if (isResponse(auth)) return auth;
 
   const body = await parseJson(request);
@@ -3635,18 +3636,6 @@ const saveOfficialDocumentSettings = async (
   if ((body.remove_logo !== undefined && typeof body.remove_logo !== 'boolean') ||
     (body.remove_graphic !== undefined && typeof body.remove_graphic !== 'boolean')) {
     return errorResponse('Official document asset removal flags must be boolean.', 400);
-  }
-  if (auth.profile.role !== 'super_admin') {
-    const allowedFields = new Set(['settings', 'graphic_file_base64', 'remove_graphic']);
-    const hasGraphicUpload = body.graphic_file_base64 !== undefined;
-    const removesGraphic = body.remove_graphic === true;
-    if (
-      Object.keys(body).some((field) => !allowedFields.has(field)) ||
-      Object.keys(body.settings as Record<string, unknown>).length > 0 ||
-      hasGraphicUpload === removesGraphic
-    ) {
-      return errorResponse('Admins may only upload or remove the admission PDF header photo.', 403);
-    }
   }
   const { data: currentData, error: currentError } = await auth.supabase
     .from('official_document_settings')
@@ -3714,9 +3703,7 @@ const saveOfficialDocumentSettings = async (
     return validated;
   }
 
-  const settingsToPersist = auth.profile.role === 'super_admin'
-    ? { ...validated, termsAndConditions: undefined }
-    : { graphicObjectKey: validated.graphicObjectKey };
+  const settingsToPersist = { ...validated, termsAndConditions: undefined };
   const { data, error } = await auth.supabase.rpc('update_official_document_settings', {
     p_settings: settingsToPersist,
     p_updated_by: auth.profile.id,
@@ -3766,7 +3753,7 @@ const previewOfficialDocument = async (
   request: Request,
   env: Env,
 ): Promise<Response> => {
-  const auth = await requireAdmin(request, env, 'admin');
+  const auth = await requireAdmin(request, env, 'super_admin');
   if (isResponse(auth)) return auth;
   const body = await parseJson(request);
   if (isResponse(body)) return body;
@@ -3881,7 +3868,7 @@ const getOfficialDocumentVersions = async (
   request: Request,
   env: Env,
 ): Promise<Response> => {
-  const auth = await requireAdmin(request, env, 'admin');
+  const auth = await requireAdmin(request, env, 'super_admin');
   if (isResponse(auth)) return auth;
   const url = new URL(request.url);
   const applicationId = url.searchParams.get('application_id') || '';
@@ -3919,7 +3906,7 @@ const getIssuedOfficialDocument = async (
   request: Request,
   env: Env,
 ): Promise<Response> => {
-  const auth = await requireAdmin(request, env, 'admin');
+  const auth = await requireAdmin(request, env, 'super_admin');
   if (isResponse(auth)) return auth;
   const url = new URL(request.url);
   const applicationId = url.searchParams.get('application_id') || '';
@@ -3981,7 +3968,7 @@ const getOfficialDocumentAsset = async (
 ): Promise<Response> => {
   const assetType = new URL(request.url).searchParams.get('type');
   if (assetType !== 'logo' && assetType !== 'graphic') return errorResponse('Asset type must be logo or graphic.', 400);
-  const auth = await requireAdmin(request, env, assetType === 'logo' ? 'staff' : 'admin');
+  const auth = await requireAdmin(request, env, 'super_admin');
   if (isResponse(auth)) return auth;
   const settings = await loadOfficialDocumentSettings(auth.supabase);
   if (isResponse(settings)) return settings;
@@ -4001,20 +3988,10 @@ const getOfficialDocumentAsset = async (
 };
 
 const updateBranding = async (request: Request, env: Env): Promise<Response> => {
-  const auth = await requireAdmin(request, env, 'admin');
+  const auth = await requireAdmin(request, env, 'super_admin');
   if (isResponse(auth)) return auth;
   const body = await parseJson(request);
   if (isResponse(body)) return body;
-  if (auth.profile.role !== 'super_admin') {
-    const allowedFields = new Set(['hero_photo_file_base64', 'hero_photo_url']);
-    if (
-      Object.keys(body).some((field) => !allowedFields.has(field)) ||
-      (body.hero_photo_file_base64 === undefined && body.hero_photo_url !== null) ||
-      (body.hero_photo_url !== undefined && body.hero_photo_url !== null)
-    ) {
-      return errorResponse('Admins may only upload a new hero photo or remove the current hero photo.', 403);
-    }
-  }
   const normalizedBody = { ...body };
   if (body.main_logo_alt !== undefined) normalizedBody.logo_alt = body.main_logo_alt;
   if (body.primary_color !== undefined) normalizedBody.primary_orange = body.primary_color;
@@ -4248,7 +4225,7 @@ export async function handleApiRequest(request: Request, env: Env): Promise<Resp
       return methodNotAllowed(['GET', 'POST']);
     }
     if (pathname === '/api/admin/faqs') {
-      if (method === 'GET') return adminTable(request, env, 'faqs', READ_COLUMNS.faqs, 'display_order', true, 'super_admin');
+      if (method === 'GET') return adminTable(request, env, 'faqs', READ_COLUMNS.faqs, 'display_order', true, 'admin');
       if (method === 'POST') return createFaq(request, env);
       return methodNotAllowed(['GET', 'POST']);
     }
@@ -4319,7 +4296,7 @@ export async function handleApiRequest(request: Request, env: Env): Promise<Resp
       }
       if (resource === 'faqs') {
         if (method === 'PUT') return updateFaq(request, env, id);
-        if (method === 'DELETE') return deleteRow(request, env, 'faqs', id, 'super_admin', 'FAQ');
+        if (method === 'DELETE') return deleteRow(request, env, 'faqs', id, 'admin', 'FAQ');
         return methodNotAllowed(['PUT', 'DELETE']);
       }
       if (resource === 'reviews') {
