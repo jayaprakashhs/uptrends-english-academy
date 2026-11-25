@@ -24,7 +24,7 @@ interface SocialIconsProps {
   iconSizeClassName?: string;
 }
 
-const SocialIcons: React.FC<SocialIconsProps> = ({
+export const SocialIcons: React.FC<SocialIconsProps> = ({
   idPrefix,
   navClassName = '',
   linkSizeClassName = 'h-10 w-[30px] sm:w-10',
@@ -41,6 +41,7 @@ const SocialIcons: React.FC<SocialIconsProps> = ({
         target="_blank"
         rel="noopener noreferrer"
         aria-label={`Visit us on ${link.name}`}
+        title={link.name}
         className={`flex shrink-0 items-center justify-center rounded-full transition-transform hover:scale-110 active:scale-95 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-700 motion-reduce:transition-none ${linkSizeClassName}`}
       >
         <svg

@@ -1,14 +1,16 @@
 import React, { useState } from 'react';
 import { Logo } from '../components/Logo';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { findAdminProfile } from '../lib/adminAuth';
+import type { AdminProfile } from '../types';
 import { ShieldCheck, Lock, Mail, AlertCircle, ArrowLeft, ArrowRight, HelpCircle } from 'lucide-react';
 
 interface AdminLoginProps {
-  onLoginSuccess: (userProfile: any) => void;
-  setCurrentPage: (page: string) => void;
+  onLoginSuccess: (userProfile: AdminProfile) => void;
+  sessionRestoreError?: string | null;
 }
 
-export const AdminLogin: React.FC<AdminLoginProps> = ({ onLoginSuccess, setCurrentPage }) => {
+export const AdminLogin: React.FC<AdminLoginProps> = ({ onLoginSuccess, sessionRestoreError }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -38,33 +40,25 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onLoginSuccess, setCurre
           throw new Error(authError.message);
         }
 
-        if (data.user) {
-          // Fetch admin profile
-          const { data: profile, error: profileErr } = await supabase
-            .from('admin_profiles')
-            .select('*')
-            .eq('id', data.user.id)
-            .single();
-
-          if (profileErr || !profile) {
-            // User exists in auth but has not been provisioned as admin profile
-            throw new Error(
-              'User authentication successful, but no authorized admin profile was found in public.admin_profiles. Please run the provisioning SQL migration in Supabase SQL Editor.'
-            );
-          }
-
-          if (!profile.is_active) {
-            throw new Error('This admin account has been deactivated. Contact Super Admin.');
-          }
-
-          if (data.session?.access_token) {
-            profile.accessToken = data.session.access_token;
-            sessionStorage.setItem('uptrends_access_token', data.session.access_token);
-          }
-
-          onLoginSuccess(profile);
-          return;
+        if (!data.user || !data.session?.access_token) {
+          throw new Error('Authentication did not return a valid admin session.');
         }
+
+        const result = await findAdminProfile(data.user.id, data.session.access_token);
+        if (result.status !== 'active') {
+          const { error: signOutError } = await supabase.auth.signOut();
+          sessionStorage.removeItem('uptrends_access_token');
+          if (signOutError) throw signOutError;
+          throw new Error(
+            result.status === 'missing'
+              ? 'User authentication successful, but no authorized admin profile was found in public.admin_profiles. Please run the provisioning SQL migration in Supabase SQL Editor.'
+              : 'This admin account has been deactivated. Contact Super Admin.',
+          );
+        }
+
+        sessionStorage.setItem('uptrends_access_token', data.session.access_token);
+        onLoginSuccess(result.profile);
+        return;
       } else {
         throw new Error(
           'Admin login is unavailable because Supabase is not configured. Please contact the site administrator.'
@@ -82,14 +76,15 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onLoginSuccess, setCurre
       <span aria-hidden="true" className="pointer-events-none absolute -left-12 top-24 h-40 w-40 rounded-full bg-sky-100/80" />
       <span aria-hidden="true" className="pointer-events-none absolute -right-10 bottom-8 h-52 w-52 rounded-full bg-orange-50/90" />
       <div className="relative z-10 max-w-md w-full">
-        <button
-          type="button"
-          onClick={() => setCurrentPage('home')}
+        <a
+          href="https://uptrendsenglishacademy.in"
+          target="_blank"
+          rel="noopener noreferrer"
           className="mb-3 inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-500"
         >
           <ArrowLeft className="h-4 w-4" aria-hidden="true" />
           Back to Academy Website
-        </button>
+        </a>
         <div className="w-full bg-white rounded-3xl border border-slate-200/80 shadow-2xl overflow-hidden">
         {/* Header Banner */}
         <div className="bg-slate-900 p-8 text-center text-white relative">
@@ -117,10 +112,10 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onLoginSuccess, setCurre
             </div>
           )}
 
-          {error && (
+          {(error || sessionRestoreError) && (
             <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-xl flex items-start gap-2 text-rose-700 text-xs">
               <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-              <span>{error}</span>
+              <span>{error || sessionRestoreError}</span>
             </div>
           )}
 

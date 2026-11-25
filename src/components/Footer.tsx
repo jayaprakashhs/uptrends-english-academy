@@ -1,6 +1,7 @@
 import React from 'react';
 import { Logo } from './Logo';
-import { MapPin, Phone, Mail, Clock, ArrowUpRight, ShieldCheck, Heart } from 'lucide-react';
+import { SocialIcons } from './Header';
+import { MapPin, Phone, Mail, Clock, ArrowUpRight } from 'lucide-react';
 
 import { SiteBranding } from '../types';
 
@@ -173,6 +174,17 @@ export const Footer: React.FC<FooterProps> = ({
                 </a>
               </li>
             </ul>
+            <div className="mt-5">
+              <h5 className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-300">
+                Follow Us
+              </h5>
+              <SocialIcons
+                idPrefix="footer"
+                navClassName="gap-2 sm:gap-3"
+                linkSizeClassName="h-11 w-11"
+                iconSizeClassName="h-6 w-6"
+              />
+            </div>
           </div>
 
           {/* Column 4: Regular Business Hours */}
@@ -198,15 +210,6 @@ export const Footer: React.FC<FooterProps> = ({
               </p>
             </div>
 
-            <div className="mt-4">
-              <button
-                onClick={() => handleNav('admin')}
-                className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-300 transition-colors"
-              >
-                <ShieldCheck className="w-3.5 h-3.5" />
-                Authorized Admin Portal
-              </button>
-            </div>
           </div>
         </div>
 

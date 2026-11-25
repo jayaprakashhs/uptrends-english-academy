@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Header } from './components/Header';
 import { AnnouncementBanner } from './components/AnnouncementBanner';
 import { Footer } from './components/Footer';
@@ -20,6 +20,14 @@ import { AdminPortal } from './pages/AdminPortal';
 import { NotFound } from './pages/NotFound';
 import { fetchPublicJson, getPublicApiErrorMessage, PublicApiError } from './lib/publicApi';
 import { supabase } from './lib/supabase';
+import { restoreAdminSession } from './lib/adminAuth';
+import {
+  getAdminPageFromPath,
+  getAdminPathForPage,
+  getInitialPage,
+  isAdminHostname,
+  type AdminPage,
+} from './lib/appRouting';
 
 import { Program, MediaItem, FAQ, AdminProfile, SiteBranding } from './types';
 
@@ -61,7 +69,10 @@ const emptyPublicStatuses: PublicResourceStatuses = {
 };
 
 export function App() {
-  const [currentPage, setCurrentPage] = useState<string>('home');
+  const isAdminHost = isAdminHostname(window.location.hostname);
+  const [currentPage, setCurrentPageState] = useState<string>(() =>
+    getInitialPage(window.location.hostname, window.location.pathname),
+  );
   const [selectedProgram, setSelectedProgram] = useState<Program | null>(null);
 
   // Global Callback Modal State
@@ -76,7 +87,33 @@ export function App() {
 
   // Admin Session State
   const [currentAdmin, setCurrentAdmin] = useState<AdminProfile | null>(null);
+  const [adminSessionRestoring, setAdminSessionRestoring] = useState(isAdminHost);
+  const [adminSessionError, setAdminSessionError] = useState<string | null>(null);
+  const [adminLogoutError, setAdminLogoutError] = useState<string | null>(null);
+  const [adminRestoreRequest, setAdminRestoreRequest] = useState(0);
   const adminExpiryHandled = useRef(false);
+  const manualLogoutInProgress = useRef(false);
+
+  const navigateToPage = useCallback((page: string, replace = false) => {
+    if (isAdminHost) {
+      const adminPage: AdminPage =
+        page === 'admin' || page === 'admin-portal' ? 'admin-portal' : 'admin-login';
+      const pathname = getAdminPathForPage(adminPage);
+
+      if (window.location.pathname !== pathname) {
+        if (replace) {
+          window.history.replaceState(null, '', pathname);
+        } else {
+          window.history.pushState(null, '', pathname);
+        }
+      }
+
+      setCurrentPageState(adminPage);
+      return;
+    }
+
+    setCurrentPageState(page);
+  }, [isAdminHost]);
 
   // Data Collections
   const [programs, setPrograms] = useState<Program[]>([]);
@@ -128,6 +165,7 @@ export function App() {
   };
 
   useEffect(() => {
+    if (isAdminHost) return;
     const controller = new AbortController();
     void Promise.all(
       (['branding', 'programs', 'media', 'faqs'] as const).map((resource) =>
@@ -139,7 +177,77 @@ export function App() {
       controller.abort();
       window.removeEventListener('admin-data-updated', refreshPublicCatalogue);
     };
-  }, []);
+  }, [isAdminHost]);
+
+  useEffect(() => {
+    if (!isAdminHost) {
+      setAdminSessionRestoring(false);
+      return;
+    }
+
+    let active = true;
+    setAdminSessionRestoring(true);
+
+    void restoreAdminSession().then((profile) => {
+      if (!active) return;
+      setCurrentAdmin(profile);
+      setAdminSessionError(null);
+      if (profile) {
+        setCurrentPageState('admin-portal');
+        const path = getAdminPathForPage('admin-portal');
+        if (window.location.pathname !== path) {
+          window.history.replaceState(null, '', path);
+        }
+      } else if (
+        window.location.pathname !== '/' &&
+        window.location.pathname !== getAdminPathForPage('admin-login')
+      ) {
+        setCurrentPageState('admin-login');
+        const path = getAdminPathForPage('admin-login');
+        if (window.location.pathname !== path) {
+          window.history.replaceState(null, '', path);
+        }
+      }
+    }).catch((error: unknown) => {
+      if (!active) return;
+      console.error('Unable to restore the admin session.', error);
+      setAdminSessionError('We could not verify your saved admin session. Please sign in again.');
+      setCurrentAdmin(null);
+      setCurrentPageState('admin-login');
+      const path = getAdminPathForPage('admin-login');
+      if (window.location.pathname !== path) {
+        window.history.replaceState(null, '', path);
+      }
+    }).finally(() => {
+      if (active) setAdminSessionRestoring(false);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [isAdminHost, adminRestoreRequest]);
+
+  useEffect(() => {
+    if (!isAdminHost) return;
+    document.title = currentPage === 'admin-portal'
+      ? "Admin Portal | Uptrend's English Academy"
+      : "Admin Login | Uptrend's English Academy";
+  }, [isAdminHost, currentPage]);
+
+  useEffect(() => {
+    if (!isAdminHost) return;
+
+    const handlePopState = () => {
+      const page = getAdminPageFromPath(window.location.pathname);
+      if (page === 'admin-portal' && !currentAdmin) {
+        setAdminRestoreRequest((request) => request + 1);
+      }
+      navigateToPage(page, true);
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [isAdminHost, currentAdmin, navigateToPage]);
 
   useEffect(() => {
     if (!branding) return;
@@ -181,23 +289,42 @@ export function App() {
 
   const handleAdminLoginSuccess = (profile: AdminProfile) => {
     adminExpiryHandled.current = false;
+    setAdminSessionError(null);
     setCurrentAdmin(profile);
-    setCurrentPage('admin-portal');
+    navigateToPage('admin-portal');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const handleAdminLogout = () => {
-    setCurrentAdmin(null);
-    setCurrentPage('home');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+  const handleAdminLogout = async () => {
+    manualLogoutInProgress.current = true;
+    setAdminLogoutError(null);
+
+    try {
+      if (supabase) {
+        const { error } = await supabase.auth.signOut();
+        if (error) throw error;
+      }
+
+      sessionStorage.removeItem('uptrends_access_token');
+      setCurrentAdmin(null);
+      navigateToPage('admin-login');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (error) {
+      console.error('Unable to sign out of the admin portal.', error);
+      setAdminLogoutError('Unable to sign out safely. Please try again.');
+    } finally {
+      manualLogoutInProgress.current = false;
+    }
   };
 
   const handleAdminSessionExpired = () => {
+    if (manualLogoutInProgress.current) return;
     if (adminExpiryHandled.current) return;
     adminExpiryHandled.current = true;
     sessionStorage.removeItem('uptrends_access_token');
     setCurrentAdmin(null);
-    setCurrentPage('admin-login');
+    setAdminSessionError('Your admin session has expired. Please sign in again.');
+    navigateToPage('admin-login', true);
     window.scrollTo({ top: 0, behavior: 'smooth' });
     void supabase?.auth.signOut().then(({ error }) => {
       if (error) console.error('Unable to complete sign-out after admin session expiry.', error);
@@ -206,23 +333,30 @@ export function App() {
     });
   };
 
-  // If in admin portal
-  if (currentPage === 'admin' || currentPage === 'admin-portal') {
-    if (!currentAdmin) {
+  if (isAdminHost) {
+    if (adminSessionRestoring) {
       return (
-        <AdminLogin
-          onLoginSuccess={handleAdminLoginSuccess}
-          setCurrentPage={setCurrentPage}
+        <main className="flex min-h-screen items-center justify-center bg-[#fff8ef] text-sm font-medium text-slate-600" role="status">
+          Verifying admin session…
+        </main>
+      );
+    }
+
+    if (currentPage === 'admin-portal' && currentAdmin) {
+      return (
+        <AdminPortal
+          currentAdmin={currentAdmin}
+          onLogout={handleAdminLogout}
+          onSessionExpired={handleAdminSessionExpired}
+          logoutError={adminLogoutError}
         />
       );
     }
 
     return (
-      <AdminPortal
-        currentAdmin={currentAdmin}
-        onLogout={handleAdminLogout}
-        onSessionExpired={handleAdminSessionExpired}
-        setCurrentPage={setCurrentPage}
+      <AdminLogin
+        onLoginSuccess={handleAdminLoginSuccess}
+        sessionRestoreError={adminSessionError}
       />
     );
   }
@@ -234,7 +368,7 @@ export function App() {
         <div className="relative z-50">
           <AnnouncementBanner
             onOpenApplication={() => {
-              setCurrentPage('apply');
+              navigateToPage('apply');
               window.scrollTo({ top: 0, behavior: 'smooth' });
             }}
             onOpenDemoClass={() => setDemoClassModalOpen(true)}
@@ -244,7 +378,7 @@ export function App() {
         {/* Main Navigation Header */}
         <Header
           currentPage={currentPage}
-          setCurrentPage={setCurrentPage}
+          setCurrentPage={navigateToPage}
           openCallbackModal={openCallbackModal}
           branding={branding}
         />
@@ -287,7 +421,7 @@ export function App() {
             mediaItems={mediaItems}
             dataStatuses={publicStatuses}
             onRetryData={(resource) => void loadPublicResource(resource)}
-            setCurrentPage={setCurrentPage}
+            setCurrentPage={navigateToPage}
             setSelectedProgram={setSelectedProgram}
             openCallbackModal={openCallbackModal}
             openDemoClassModal={() => setDemoClassModalOpen(true)}
@@ -300,7 +434,7 @@ export function App() {
           <AboutUs
             openVideoModal={openVideoModal}
             openCallbackModal={openCallbackModal}
-            setCurrentPage={setCurrentPage}
+            setCurrentPage={navigateToPage}
           />
         )}
 
@@ -308,7 +442,7 @@ export function App() {
           <Programs
             programs={programs}
             setSelectedProgram={setSelectedProgram}
-            setCurrentPage={setCurrentPage}
+            setCurrentPage={navigateToPage}
             openCallbackModal={openCallbackModal}
             openDemoClassModal={() => setDemoClassModalOpen(true)}
           />
@@ -317,7 +451,7 @@ export function App() {
         {currentPage === 'program-details' && (
           <ProgramDetails
             program={selectedProgram || programs[0]}
-            setCurrentPage={setCurrentPage}
+            setCurrentPage={navigateToPage}
             openCallbackModal={openCallbackModal}
           />
         )}
@@ -335,7 +469,7 @@ export function App() {
           <FAQs
             faqs={faqs}
             openCallbackModal={openCallbackModal}
-            setCurrentPage={setCurrentPage}
+            setCurrentPage={navigateToPage}
           />
         )}
 
@@ -350,14 +484,7 @@ export function App() {
           <ApplyNow
             programs={programs}
             selectedProgram={selectedProgram}
-            setCurrentPage={setCurrentPage}
-          />
-        )}
-
-        {currentPage === 'admin-login' && (
-          <AdminLogin
-            onLoginSuccess={handleAdminLoginSuccess}
-            setCurrentPage={setCurrentPage}
+            setCurrentPage={navigateToPage}
           />
         )}
 
@@ -370,16 +497,13 @@ export function App() {
           'faqs',
           'contact',
           'apply',
-          'admin-login',
-          'admin-portal',
-          'admin',
-        ].includes(currentPage) && <NotFound setCurrentPage={setCurrentPage} />}
+        ].includes(currentPage) && <NotFound setCurrentPage={navigateToPage} />}
       </main>
 
       {/* Footer */}
       {currentPage !== 'apply' && (
         <Footer
-          setCurrentPage={setCurrentPage}
+          setCurrentPage={navigateToPage}
           openCallbackModal={openCallbackModal}
           branding={branding}
         />
