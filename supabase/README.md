@@ -180,10 +180,11 @@ no approval evidence is created or policy enabled by this migration.
 
 After reviewing the schema, apply
 `supabase/migrations/20261104000000_about_us_management.sql` and
-`supabase/migrations/20261105000000_about_us_r2_asset_metadata.sql` to enable
-About Us content management. They use the existing `admin_profiles` table,
-role values, and `public.is_super_admin()` checks; they do not create another
-authentication or role system.
+`supabase/migrations/20261105000000_about_us_r2_asset_metadata.sql`, followed by
+`supabase/migrations/20261126000000_team_member_teaching_skills.sql`, to enable
+the current About Us content management features. They use the existing
+`admin_profiles` table, role values, and `public.is_super_admin()` checks; they
+do not create another authentication or role system.
 
 The migrations add instructor qualifications, R2 object keys, and image content
 metadata to `team_members`, and create a singleton video-configuration table
@@ -192,6 +193,12 @@ with published read access. They do not create a Supabase Storage bucket or any
 `APPLICATION_MEDIA` Cloudflare R2 bucket through authenticated Worker
 endpoints. Supabase stores the R2 object key, MIME type, and byte count only; it
 does not store image bytes or Supabase Storage URLs.
+
+The instructor-card design also uses the existing
+`supabase/migrations/20261126000000_team_member_teaching_skills.sql` migration,
+which adds an ordered `teaching_skills` JSONB array to `team_members` with an
+empty-array default. Each item stores a short display label and a supported
+Lucide icon key; the existing team-member RLS policies are unchanged.
 
 The Worker verifies the bearer token against Supabase Auth and checks the user's
 active `admin_profiles.role` server-side before allowing image upload, private
@@ -215,8 +222,8 @@ this bucket to `APPLICATION_MEDIA` and uses a separate
 These variables belong only in the server environment, never in `VITE_*`
 variables or browser code.
 
-The SQL is not applied by the application code. Apply both migrations in order
-only after reviewing their complete SQL. No existing records are deleted.
+The SQL is not applied by the application code. Apply all three migrations in
+order only after reviewing their complete SQL. No existing records are deleted.
 Then verify that a Super Admin can manage content, while Admin, Staff, and
 anonymous users cannot upload, preview unpublished images, or modify About Us
 records. Public visitors should see only published profiles and the published
